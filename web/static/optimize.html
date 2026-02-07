@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Eval - Prompt Optimizer</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #111827;
+      --muted: #94a3b8;
+      --text: #e2e8f0;
+      --accent: #38bdf8;
+      --good: #22c55e;
+      --bad: #ef4444;
+      --warning: #f59e0b;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Tahoma, sans-serif;
+      background: radial-gradient(1200px 800px at 20% 10%, #1e293b, var(--bg));
+      color: var(--text);
+      min-height: 100vh;
+    }
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 32px 20px 60px;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    h1 { font-size: 28px; margin: 0; }
+    h2 { font-size: 20px; margin: 0 0 16px; }
+    .nav {
+      display: flex;
+      gap: 16px;
+    }
+    .nav a {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 14px;
+    }
+    .nav a:hover, .nav a.active {
+      color: var(--accent);
+    }
+    .card {
+      background: rgba(17, 24, 39, 0.8);
+      border: 1px solid rgba(148, 163, 184, 0.15);
+      border-radius: 12px;
+      padding: 20px;
+      backdrop-filter: blur(8px);
+      margin-bottom: 20px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+    @media (max-width: 900px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+    textarea {
+      width: 100%;
+      height: 300px;
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid rgba(148, 163, 184, 0.2);
+      border-radius: 8px;
+      color: var(--text);
+      font-family: "JetBrains Mono", "Fira Code", monospace;
+      font-size: 13px;
+      padding: 12px;
+      resize: vertical;
+    }
+    textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    .btn {
+      background: var(--accent);
+      color: #0f172a;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .btn:hover { opacity: 0.9; }
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .btn-secondary {
+      background: transparent;
+      border: 1px solid rgba(148, 163, 184, 0.3);
+      color: var(--text);
+    }
+    .subtle { color: var(--muted); font-size: 14px; }
+    .stats {
+      display: flex;
+      gap: 24px;
+      margin: 16px 0;
+    }
+    .stat {
+      text-align: center;
+    }
+    .stat-value {
+      font-size: 24px;
+      font-weight: 600;
+    }
+    .stat-label {
+      font-size: 12px;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+    .badge {
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      display: inline-block;
+    }
+    .badge.good { background: rgba(34, 197, 94, 0.2); color: var(--good); }
+    .badge.bad { background: rgba(239, 68, 68, 0.2); color: var(--bad); }
+    .badge.warning { background: rgba(245, 158, 11, 0.2); color: var(--warning); }
+    .changes {
+      margin-top: 16px;
+    }
+    .change-item {
+      background: rgba(15, 23, 42, 0.6);
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 8px;
+    }
+    .change-type {
+      font-size: 11px;
+      text-transform: uppercase;
+      color: var(--accent);
+      font-weight: 600;
+    }
+    .loading {
+      display: none;
+      align-items: center;
+      gap: 12px;
+      padding: 20px;
+    }
+    .loading.active { display: flex; }
+    .spinner {
+      width: 20px;
+      height: 20px;
+      border: 2px solid rgba(148, 163, 184, 0.3);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .result { display: none; }
+    .result.active { display: block; }
+    .copy-btn {
+      background: transparent;
+      border: 1px solid rgba(148, 163, 184, 0.3);
+      color: var(--muted);
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .copy-btn:hover { color: var(--text); border-color: var(--text); }
+    .suggestions {
+      list-style: none;
+      padding: 0;
+      margin: 8px 0;
+    }
+    .suggestions li {
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+      font-size: 14px;
+    }
+    .suggestions li:last-child { border-bottom: none; }
+    .analysis {
+      font-size: 14px;
+      line-height: 1.6;
+      color: var(--text);
+    }
+    .tabs {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 16px;
+    }
+    .tab {
+      padding: 8px 16px;
+      background: transparent;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+    .tab:hover { background: rgba(148, 163, 184, 0.1); }
+    .tab.active {
+      background: rgba(56, 189, 248, 0.15);
+      color: var(--accent);
+    }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    .diff {
+      font-family: "JetBrains Mono", "Fira Code", monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+      background: rgba(15, 23, 42, 0.8);
+      padding: 16px;
+      border-radius: 8px;
+      overflow-x: auto;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div>
+        <h1>AI Eval</h1>
+        <div class="subtle">Prompt Optimizer</div>
+      </div>
+      <nav class="nav">
+        <a href="/">Dashboard</a>
+        <a href="/optimize.html" class="active">Optimize</a>
+      </nav>
+    </header>
+
+    <div class="grid">
+      <div>
+        <div class="card">
+          <h2>Input Prompt</h2>
+          <textarea id="promptInput" placeholder="Paste your prompt here..."></textarea>
+          <div style="margin-top: 12px; display: flex; gap: 12px; align-items: center;">
+            <button class="btn" id="optimizeBtn" onclick="optimize()">
+              <span>🚀</span> Optimize
+            </button>
+            <label class="subtle">
+              <input type="number" id="numCases" value="5" min="3" max="10" style="width: 50px; background: transparent; border: 1px solid rgba(148, 163, 184, 0.3); color: var(--text); border-radius: 4px; padding: 4px;">
+              test cases
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="card">
+          <h2>Optimized Prompt</h2>
+          <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <span id="loadingText">Analyzing prompt...</span>
+          </div>
+          <div class="result" id="result">
+            <div class="tabs">
+              <button class="tab active" onclick="showTab('optimized')">Optimized</button>
+              <button class="tab" onclick="showTab('analysis')">Analysis</button>
+              <button class="tab" onclick="showTab('changes')">Changes</button>
+            </div>
+            <div class="tab-content active" id="tab-optimized">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <div class="stats" id="evalStats"></div>
+                <button class="copy-btn" onclick="copyOptimized()">Copy</button>
+              </div>
+              <textarea id="optimizedOutput" readonly style="height: 200px;"></textarea>
+            </div>
+            <div class="tab-content" id="tab-analysis">
+              <h3 style="font-size: 16px; margin: 0 0 12px;">Analysis</h3>
+              <div class="analysis" id="analysisText"></div>
+              <h3 style="font-size: 16px; margin: 16px 0 8px;">Suggestions</h3>
+              <ul class="suggestions" id="suggestionsList"></ul>
+            </div>
+            <div class="tab-content" id="tab-changes">
+              <h3 style="font-size: 16px; margin: 0 0 12px;">Optimization Summary</h3>
+              <div class="analysis" id="summaryText"></div>
+              <div class="changes" id="changesList"></div>
+            </div>
+          </div>
+          <div id="placeholder" class="subtle" style="padding: 40px; text-align: center;">
+            Paste a prompt and click Optimize to get started.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const apiBase = '/api';
+
+    function showTab(name) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      document.querySelector(`.tab[onclick="showTab('${name}')"]`).classList.add('active');
+      document.getElementById(`tab-${name}`).classList.add('active');
+    }
+
+    async function optimize() {
+      const promptContent = document.getElementById('promptInput').value.trim();
+      if (!promptContent) {
+        alert('Please enter a prompt');
+        return;
+      }
+
+      const numCases = parseInt(document.getElementById('numCases').value) || 5;
+      const btn = document.getElementById('optimizeBtn');
+      const loading = document.getElementById('loading');
+      const result = document.getElementById('result');
+      const placeholder = document.getElementById('placeholder');
+
+      btn.disabled = true;
+      placeholder.style.display = 'none';
+      result.classList.remove('active');
+      loading.classList.add('active');
+
+      const steps = [
+        'Analyzing prompt...',
+        'Generating test cases...',
+        'Running evaluation...',
+        'Optimizing...'
+      ];
+      let stepIndex = 0;
+      const stepInterval = setInterval(() => {
+        stepIndex = (stepIndex + 1) % steps.length;
+        document.getElementById('loadingText').textContent = steps[stepIndex];
+      }, 3000);
+
+      try {
+        const res = await fetch(`${apiBase}/optimize`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt_content: promptContent,
+            prompt_name: 'prompt',
+            num_cases: numCases
+          })
+        });
+
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error || 'Optimization failed');
+        }
+
+        const data = await res.json();
+        clearInterval(stepInterval);
+        loading.classList.remove('active');
+        result.classList.add('active');
+
+        // Eval stats
+        const stats = data.eval_results || {};
+        const passRate = (stats.pass_rate * 100).toFixed(0);
+        const badgeClass = stats.pass_rate >= 0.8 ? 'good' : stats.pass_rate >= 0.5 ? 'warning' : 'bad';
+        document.getElementById('evalStats').innerHTML = `
+          <div class="stat">
+            <div class="stat-value">${passRate}%</div>
+            <div class="stat-label">Pass Rate</div>
+          </div>
+          <div class="stat">
+            <div class="stat-value">${(stats.avg_score * 100).toFixed(0)}%</div>
+            <div class="stat-label">Avg Score</div>
+          </div>
+          <div class="stat">
+            <span class="badge ${badgeClass}">${stats.passed}/${stats.total_cases} passed</span>
+          </div>
+        `;
+
+        // Optimized prompt
+        document.getElementById('optimizedOutput').value = data.optimized_prompt || '';
+
+        // Analysis
+        document.getElementById('analysisText').textContent = data.analysis || 'No analysis available.';
+        const suggestions = data.suggestions || [];
+        document.getElementById('suggestionsList').innerHTML = suggestions.length
+          ? suggestions.map(s => `<li>💡 ${s}</li>`).join('')
+          : '<li>No suggestions.</li>';
+
+        // Changes
+        document.getElementById('summaryText').textContent = data.optimization_summary || '';
+        const changes = data.changes || [];
+        document.getElementById('changesList').innerHTML = changes.length
+          ? changes.map(c => `
+              <div class="change-item">
+                <div class="change-type">${c.Type}</div>
+                <div>${c.Description}</div>
+              </div>
+            `).join('')
+          : '<div class="subtle">No changes made.</div>';
+
+      } catch (err) {
+        clearInterval(stepInterval);
+        loading.classList.remove('active');
+        alert(err.message);
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    function copyOptimized() {
+      const output = document.getElementById('optimizedOutput');
+      output.select();
+      document.execCommand('copy');
+      const btn = document.querySelector('.copy-btn');
+      btn.textContent = 'Copied!';
+      setTimeout(() => btn.textContent = 'Copy', 2000);
+    }
+  </script>
+</body>
+</html>

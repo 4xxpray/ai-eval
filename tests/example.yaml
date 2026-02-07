@@ -1,0 +1,67 @@
+suite: code_review_example
+prompt: code_review
+description: Example test suite for the code_review prompt
+cases:
+  - id: mentions_issues_and_tests
+    description: Reviewer should identify issues and mention tests.
+    max_steps: 3
+    tool_mocks:
+      - name: git
+        response: |
+          commit abc123
+          Author: Example <example@example.com>
+          Date: 2024-01-01
+
+          Add overflow TODO
+    input:
+      language: go
+      diff: |
+        diff --git a/math.go b/math.go
+        index 1111111..2222222 100644
+        --- a/math.go
+        +++ b/math.go
+        @@
+        -func Add(a, b int) int { return a + b }
+        +func Add(a, b int) int {
+        +  // TODO: handle overflow
+        +  return a + b
+        +}
+    expected:
+      regex:
+        - "(?i)(overflow|issue|concern|problem|bug)"
+        - "(?i)test"
+      not_contains:
+        - LGTM
+  - id: multi_step_with_tool_mocks
+    description: Example multi-step case using mocked tools to continue the conversation.
+    max_steps: 5
+    tool_mocks:
+      - name: git
+        response: |
+          commit abc123
+          Author: Example <example@example.com>
+          Date: 2024-01-01
+
+          Add overflow TODO
+        match:
+          cmd: "log"
+      - name: git
+        response: |
+          abc123 (HEAD -> main) Add overflow TODO
+    input:
+      language: go
+      diff: |
+        diff --git a/math.go b/math.go
+        index 1111111..2222222 100644
+        --- a/math.go
+        +++ b/math.go
+        @@
+        -func Add(a, b int) int { return a + b }
+        +func Add(a, b int) int {
+        +  // TODO: handle overflow
+        +  return a + b
+        +}
+    expected:
+      regex:
+        - "(?i)(overflow|issue|concern|problem)"
+        - "(?i)test"

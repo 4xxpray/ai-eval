@@ -1,0 +1,137 @@
+suite: omo
+prompt: omo
+cases:
+  # --- Agent Routing Tests ---
+  - id: simple_type_fix
+    description: Known location, low-risk fix should route directly to develop
+    input:
+      user_request: "fix this type error at src/foo.ts:123"
+    evaluators:
+      - type: contains
+        expected: "develop"
+      - type: llm_judge
+        criteria: |
+          The response should route DIRECTLY to the develop agent without calling explore first,
+          because the exact file path and line number are already provided. It should include
+          a codeagent-wrapper invocation with --agent develop and pass the original request
+          in the Context Pack. It should NOT invoke explore.
+
+  - id: unknown_bug_location
+    description: Bug with unknown location should use explore then develop
+    input:
+      user_request: "there's a null pointer exception happening in production, fix it"
+    evaluators:
+      - type: llm_judge
+        criteria: |
+          The response MUST invoke the explore agent first to locate the bug,
+          then invoke develop to fix it. Both agents must be invoked via
+          codeagent-wrapper. The develop invocation must include the explore
+          output in its Context Pack. Check for both --agent explore and
+          --agent develop in the codeagent-wrapper invocations.
+
+  - id: explain_code_only
+    description: Analysis-only task should only use explore, no implementation agents
+    input:
+      user_request: "how does the authentication middleware work in this project?"
+    evaluators:
+      - type: contains
+        expected: "explore"
+      - type: llm_judge
+        criteria: |
+          The response should only invoke the explore agent for analysis.
+          It should NOT invoke develop, frontend-ui-ux-engineer, or document-writer
+          since the user only wants an explanation, not code changes.
+
+  - id: cross_cutting_refactor
+    description: High-risk multi-file refactor should include oracle for planning
+    input:
+      user_request: "refactor the authentication system to use JWT instead of sessions, this affects the middleware, user model, and all API routes"
+    evaluators:
+      - type: llm_judge
+        criteria: |
+          The response MUST invoke all three agents in order: explore, oracle, develop.
+          1. explore: to understand the current auth system
+          2. oracle: to plan the migration (multi-file, public API, security = high risk)
+          3. develop: to implement
+          Each must be invoked via codeagent-wrapper with proper Context Pack.
+          Oracle is MANDATORY here due to high risk signals.
+
+  - id: external_api_integration
+    description: External library usage should invoke librarian
+    input:
+      user_request: "add Stripe payment integration to the checkout flow"
+    evaluators:
+      - type: llm_judge
+        criteria: |
+          The response MUST invoke the librarian agent (to look up Stripe API docs)
+          AND the explore agent (to understand the checkout flow). These can run
+          in parallel. Then it should invoke develop for implementation.
+          The response must contain codeagent-wrapper invocations with
+          --agent librarian and --agent explore.
+
+  - id: ui_only_change
+    description: UI-only task should route to frontend-ui-ux-engineer
+    input:
+      user_request: "update the dashboard layout to use a sidebar navigation instead of top nav"
+    evaluators:
+      - type: llm_judge
+        criteria: |
+          The response MUST invoke frontend-ui-ux-engineer (NOT develop) for the UI
+          implementation. It should first invoke explore to understand the current layout,
+          then frontend-ui-ux-engineer for the implementation. The codeagent-wrapper
+          invocation must use --agent frontend-ui-ux-engineer, not --agent develop.
+
+  # --- Hard Constraint Tests ---
+  - id: no_direct_code_writing
+    description: Orchestrator must never write code itself
+    input:
+      user_request: "add a simple console.log to src/main.ts"
+    evaluators:
+      - type: llm_judge
+        criteria: |
+          The response must NOT contain any code written directly by the orchestrator.
+          It must delegate even simple changes to an implementation agent (develop).
+          The response should contain a codeagent-wrapper invocation, not inline code.
+          There should be no typescript or javascript code blocks written by the orchestrator.
+
+  - id: context_passing
+    description: Must pass context between agent steps
+    input:
+      user_request: "investigate why the API is slow and optimize it"
+    evaluators:
+      - type: llm_judge
+        criteria: |
+          The response MUST show multi-step agent invocations where each subsequent
+          agent receives the output of previous agents. The codeagent-wrapper blocks
+          must include Context Pack sections. Later steps must reference previous
+          agent output (e.g., "[paste complete explore output here]" or similar).
+          The original user request must appear in each invocation.
+
+  - id: docs_only_change
+    description: Documentation task should route to document-writer
+    input:
+      user_request: "write API documentation for the /users endpoint"
+    evaluators:
+      - type: llm_judge
+        criteria: |
+          The response MUST invoke document-writer (NOT develop) for the documentation task.
+          It should first invoke explore to understand the endpoint, then document-writer
+          to create the documentation. The codeagent-wrapper invocation must use
+          --agent document-writer, not --agent develop.
+
+  - id: invocation_format
+    description: Agent invocations must follow the correct codeagent-wrapper format
+    input:
+      user_request: "fix the broken unit test in tests/auth.test.ts"
+    evaluators:
+      - type: regex
+        pattern: 'codeagent-wrapper\s+--agent\s+\w+'
+      - type: contains
+        expected: "Original User Request"
+      - type: contains
+        expected: "Acceptance Criteria"
+      - type: llm_judge
+        criteria: |
+          The response must use the exact codeagent-wrapper invocation format:
+          codeagent-wrapper --agent <agent_name> - <workdir> <<'EOF'
+          With sections: Original User Request, Context Pack, Current Task, Acceptance Criteria.

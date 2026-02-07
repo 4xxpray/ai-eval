@@ -1,0 +1,42 @@
+# Binaries
+/bin/
+/dist/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test artifacts
+*.test
+*.out
+coverage.out
+
+# Go workspace / deps
+go.work
+go.work.sum
+/vendor/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Logs
+*.log
+
+# Local secrets / config overrides
+.env
+.env.*
+configs/*.local.yaml
+configs/*.local.yml
+configs/config.yaml
+
+# Runtime data
+/data/
+
+# Claude Code local state
+.claude/
+
+# Reference projects
+/references/

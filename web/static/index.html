@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Eval Dashboard</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #111827;
+      --muted: #94a3b8;
+      --text: #e2e8f0;
+      --accent: #38bdf8;
+      --good: #22c55e;
+      --bad: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Tahoma, sans-serif;
+      background: radial-gradient(1200px 800px at 20% 10%, #1e293b, var(--bg));
+      color: var(--text);
+    }
+    .container {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 32px 20px 60px;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    h1 {
+      font-size: 28px;
+      margin: 0;
+    }
+    .nav {
+      display: flex;
+      gap: 16px;
+    }
+    .nav a {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 14px;
+    }
+    .nav a:hover, .nav a.active {
+      color: var(--accent);
+    }
+    .subtle {
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .card {
+      background: rgba(17, 24, 39, 0.8);
+      border: 1px solid rgba(148, 163, 184, 0.15);
+      border-radius: 12px;
+      padding: 16px;
+      backdrop-filter: blur(8px);
+    }
+    .card h3 {
+      margin: 0 0 8px;
+      font-size: 13px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .card .value {
+      font-size: 22px;
+      font-weight: 600;
+    }
+    .table-wrap {
+      overflow-x: auto;
+      border-radius: 12px;
+      border: 1px solid rgba(148, 163, 184, 0.15);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 720px;
+      background: rgba(15, 23, 42, 0.6);
+    }
+    th, td {
+      padding: 12px 14px;
+      text-align: left;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+      font-size: 14px;
+    }
+    th {
+      color: var(--muted);
+      font-weight: 600;
+      letter-spacing: 0.04em;
+    }
+    a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+    a:hover { text-decoration: underline; }
+    .badge {
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      display: inline-block;
+    }
+    .badge.good { background: rgba(34, 197, 94, 0.2); color: var(--good); }
+    .badge.bad { background: rgba(239, 68, 68, 0.2); color: var(--bad); }
+    .detail {
+      margin-top: 24px;
+    }
+    .detail h2 {
+      margin: 0 0 8px;
+      font-size: 20px;
+    }
+    .actions {
+      margin-top: 12px;
+    }
+    .empty {
+      padding: 20px;
+      color: var(--muted);
+    }
+    .footer {
+      margin-top: 32px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    @media (max-width: 600px) {
+      header { flex-direction: column; align-items: flex-start; }
+      h1 { font-size: 22px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div>
+        <h1>AI Eval Dashboard</h1>
+        <div class="subtle" id="subtitle">Recent evaluation activity</div>
+      </div>
+      <nav class="nav">
+        <a href="/" class="active">Dashboard</a>
+        <a href="/optimize.html">Optimize</a>
+      </nav>
+    </header>
+
+    <section class="stats" id="stats"></section>
+
+    <section class="card" id="content">
+      <div class="empty">Loading...</div>
+    </section>
+
+    <div class="footer">Data source: /api/runs</div>
+  </div>
+
+  <script>
+    const apiBase = '/api';
+    const params = new URLSearchParams(window.location.search);
+    const runId = params.get('run');
+
+    const contentEl = document.getElementById('content');
+    const statsEl = document.getElementById('stats');
+    const clockEl = document.getElementById('clock');
+    const subtitleEl = document.getElementById('subtitle');
+
+    function setClock() {
+      clockEl.textContent = new Date().toLocaleString();
+    }
+    setClock();
+    setInterval(setClock, 30000);
+
+    function renderStats(stats) {
+      statsEl.innerHTML = '';
+      for (const item of stats) {
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.innerHTML = `<h3>${item.label}</h3><div class="value">${item.value}</div>`;
+        statsEl.appendChild(card);
+      }
+    }
+
+    async function fetchJSON(url) {
+      const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `Request failed: ${res.status}`);
+      }
+      return res.json();
+    }
+
+    function renderRunsTable(runs) {
+      if (!runs.length) {
+        contentEl.innerHTML = '<div class="empty">No runs found.</div>';
+        return;
+      }
+      const rows = runs.map(run => {
+        const badgeClass = run.FailedSuites > 0 ? 'bad' : 'good';
+        const badgeLabel = run.FailedSuites > 0 ? 'FAIL' : 'PASS';
+        return `
+          <tr>
+            <td><a href="?run=${encodeURIComponent(run.ID)}">${run.ID}</a></td>
+            <td>${new Date(run.StartedAt).toLocaleString()}</td>
+            <td>${run.TotalSuites}</td>
+            <td>${run.PassedSuites}</td>
+            <td>${run.FailedSuites}</td>
+            <td><span class="badge ${badgeClass}">${badgeLabel}</span></td>
+          </tr>
+        `;
+      }).join('');
+
+      contentEl.innerHTML = `
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Run</th>
+                <th>Started</th>
+                <th>Suites</th>
+                <th>Passed</th>
+                <th>Failed</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    function renderRunDetail(run, suites) {
+      const runStatus = run.FailedSuites > 0 ? 'bad' : 'good';
+      const suiteRows = suites.map(suite => {
+        const badgeClass = suite.FailedCases > 0 ? 'bad' : 'good';
+        const badgeLabel = suite.FailedCases > 0 ? 'FAIL' : 'PASS';
+        return `
+          <tr>
+            <td>${suite.SuiteName}</td>
+            <td>${suite.PromptName}</td>
+            <td>${suite.PromptVersion}</td>
+            <td>${suite.TotalCases}</td>
+            <td>${suite.PassedCases}</td>
+            <td>${suite.FailedCases}</td>
+            <td>${suite.PassRate.toFixed(2)}</td>
+            <td><span class="badge ${badgeClass}">${badgeLabel}</span></td>
+          </tr>
+        `;
+      }).join('');
+
+      contentEl.innerHTML = `
+        <div class="detail">
+          <h2>Run ${run.ID}</h2>
+          <div class="subtle">Started ${new Date(run.StartedAt).toLocaleString()} · Finished ${new Date(run.FinishedAt).toLocaleString()}</div>
+          <div class="actions"><a href="/">Back to overview</a></div>
+        </div>
+        <div class="stats">
+          <div class="card"><h3>Total Suites</h3><div class="value">${run.TotalSuites}</div></div>
+          <div class="card"><h3>Passed Suites</h3><div class="value">${run.PassedSuites}</div></div>
+          <div class="card"><h3>Failed Suites</h3><div class="value">${run.FailedSuites}</div></div>
+          <div class="card"><h3>Status</h3><div class="value"><span class="badge ${runStatus}">${run.FailedSuites > 0 ? 'FAIL' : 'PASS'}</span></div></div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Suite</th>
+                <th>Prompt</th>
+                <th>Version</th>
+                <th>Cases</th>
+                <th>Passed</th>
+                <th>Failed</th>
+                <th>Pass Rate</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>${suiteRows || '<tr><td colspan="8">No suite results found.</td></tr>'}</tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    async function loadDashboard() {
+      subtitleEl.textContent = 'Recent evaluation activity';
+      try {
+        const runs = await fetchJSON(`${apiBase}/runs?limit=10`);
+        const totalSuites = runs.reduce((sum, run) => sum + run.TotalSuites, 0);
+        const passedSuites = runs.reduce((sum, run) => sum + run.PassedSuites, 0);
+        const failedSuites = runs.reduce((sum, run) => sum + run.FailedSuites, 0);
+        const passRate = totalSuites ? ((passedSuites / totalSuites) * 100).toFixed(1) + '%' : 'N/A';
+
+        renderStats([
+          { label: 'Recent Runs', value: runs.length },
+          { label: 'Suites Evaluated', value: totalSuites },
+          { label: 'Pass Rate', value: passRate },
+          { label: 'Failures', value: failedSuites }
+        ]);
+        renderRunsTable(runs);
+      } catch (err) {
+        contentEl.innerHTML = `<div class="empty">${err.message}</div>`;
+      }
+    }
+
+    async function loadRunDetail(id) {
+      subtitleEl.textContent = 'Run details';
+      try {
+        const [run, suites] = await Promise.all([
+          fetchJSON(`${apiBase}/runs/${encodeURIComponent(id)}`),
+          fetchJSON(`${apiBase}/runs/${encodeURIComponent(id)}/results`)
+        ]);
+        renderStats([
+          { label: 'Run ID', value: id },
+          { label: 'Suites', value: run.TotalSuites },
+          { label: 'Passed', value: run.PassedSuites },
+          { label: 'Failed', value: run.FailedSuites }
+        ]);
+        renderRunDetail(run, suites);
+      } catch (err) {
+        contentEl.innerHTML = `<div class="empty">${err.message}</div>`;
+      }
+    }
+
+    if (runId) {
+      loadRunDetail(runId);
+    } else {
+      loadDashboard();
+    }
+  </script>
+</body>
+</html>

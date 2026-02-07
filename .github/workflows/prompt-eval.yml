@@ -1,0 +1,37 @@
+name: Prompt Evaluation
+on:
+  pull_request:
+    paths:
+      - 'prompts/**'
+      - 'tests/**'
+  workflow_dispatch:
+    inputs:
+      prompt:
+        description: 'Prompt name to evaluate (leave empty for all)'
+        required: false
+      threshold:
+        description: 'Pass threshold (0.0-1.0)'
+        required: false
+        default: '0.85'
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+      - name: Build
+        run: go build -o ai-eval ./cmd/eval
+      - name: Run Evaluation
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          ./ai-eval run --all --output github --threshold ${{ inputs.threshold || '0.85' }}
+      - name: Upload Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-results
+          path: data/

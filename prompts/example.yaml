@@ -1,0 +1,34 @@
+name: code_review
+version: "1.0"
+description: Simple code review prompt example
+template: |
+  You are a strict code reviewer.
+  Review the following diff (language={{.language}}):
+
+  {{.diff}}
+
+  Focus on correctness, simplicity, and tests.
+
+  You may optionally use the git tool to check commit history for additional context, but provide your review directly if the diff is self-explanatory.
+variables:
+  - name: language
+    required: false
+    default: go
+  - name: diff
+    required: true
+tools:
+  - name: git
+    description: Run git commands to inspect history, blame, or log. Use this to understand the context of changes.
+    input_schema:
+      type: object
+      properties:
+        cmd:
+          type: string
+          description: "The git subcommand to run (e.g., log, blame, show)"
+        args:
+          type: string
+          description: "Additional arguments for the git command"
+      required:
+        - cmd
+metadata:
+  category: code-review
