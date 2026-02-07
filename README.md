@@ -15,6 +15,127 @@ A comprehensive prompt evaluation and optimization system for LLM applications.
 - **Web API server** with evaluation endpoints
 - **SQLite storage** for results and leaderboard tracking
 
+## Architecture
+
+```mermaid
+graph TB
+    subgraph CLI["CLI (cmd/eval)"]
+        RUN[eval run]
+        BENCH[eval benchmark]
+        CMP[eval compare]
+        OPT[eval optimize]
+        LB[eval leaderboard]
+    end
+
+    subgraph API["Web API (api/)"]
+        REST[REST Endpoints]
+        WEB[Web UI]
+    end
+
+    subgraph Core["Core Engine"]
+        RUNNER[Runner]
+        LOADER[Prompt Loader]
+        TC[Test Case Loader]
+    end
+
+    subgraph LLM["LLM Providers (internal/llm)"]
+        CLAUDE[Claude / Anthropic]
+        OPENAI[OpenAI / Compatible]
+    end
+
+    subgraph Evaluators["Evaluators (internal/evaluator)"]
+        direction LR
+        BASIC["Basic\ncontains | exact | regex"]
+        SEMANTIC["Semantic\nllm_judge | factuality | similarity"]
+        SAFETY["Safety\ntoxicity | bias | hallucination"]
+        AGENT["Agent\ntool_selection | efficiency"]
+        RAG["RAG\nfaithfulness | relevancy | precision"]
+    end
+
+    subgraph Benchmark["Benchmarks (internal/benchmark)"]
+        MMLU[MMLU]
+        GSM8K[GSM8K]
+        HUMANEVAL[HumanEval]
+    end
+
+    subgraph Storage["Storage"]
+        SQLITE[(SQLite)]
+    end
+
+    CLI --> Core
+    API --> Core
+    Core --> LLM
+    Core --> Evaluators
+    BENCH --> Benchmark
+    Benchmark --> LLM
+    LB --> SQLITE
+    BENCH --> SQLITE
+    RUNNER --> LOADER
+    RUNNER --> TC
+
+    style CLI fill:#e1f5fe,stroke:#01579b
+    style API fill:#e8f5e9,stroke:#1b5e20
+    style Core fill:#fff3e0,stroke:#e65100
+    style LLM fill:#f3e5f5,stroke:#4a148c
+    style Evaluators fill:#fce4ec,stroke:#880e4f
+    style Benchmark fill:#e0f2f1,stroke:#004d40
+    style Storage fill:#f5f5f5,stroke:#616161
+```
+
+### Evaluation Flow
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant CLI
+    participant Runner
+    participant LLM as LLM Provider
+    participant Eval as Evaluators
+    participant DB as SQLite
+
+    User->>CLI: eval run --prompt example
+    CLI->>Runner: Load prompt + test cases
+
+    loop For each test case
+        loop For each trial (1..N)
+            Runner->>LLM: Send prompt + input
+            LLM-->>Runner: Response
+            Runner->>Eval: Evaluate response
+            Eval-->>Runner: Score + Pass/Fail
+        end
+    end
+
+    Runner->>DB: Store results
+    Runner-->>CLI: Suite results
+    CLI-->>User: Pass/Fail report
+```
+
+### Benchmark Flow
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant CLI
+    participant BM as Benchmark Runner
+    participant DS as Dataset
+    participant LLM as LLM Provider
+    participant LB as Leaderboard
+
+    User->>CLI: eval benchmark --dataset mmlu
+    CLI->>DS: Load questions
+    DS-->>BM: Questions[]
+
+    loop For each question
+        BM->>LLM: Question prompt
+        LLM-->>BM: Answer
+        BM->>DS: Evaluate answer
+        DS-->>BM: Score
+    end
+
+    BM->>LB: Save result
+    BM-->>User: Accuracy report
+```
+
 ## Installation
 
 ```bash
@@ -157,9 +278,10 @@ cases:
   - id: test-1
     input:
       user_task: "What is 2+2?"
+    expected:
+      contains:
+        - "4"
     evaluators:
-      - type: contains
-        expected: "4"
       - type: llm_judge
         criteria: "Response should be accurate and concise"
 ```
