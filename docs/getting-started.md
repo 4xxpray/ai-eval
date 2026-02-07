@@ -95,16 +95,17 @@ cases:
   - id: greeting
     input:
       user_request: "Say hello"
-    evaluators:
-      - type: contains
-        expected: "hello"
+    expected:
+      contains:
+        - "hello"
 
   - id: math
     input:
       user_request: "What is 2 + 2?"
+    expected:
+      contains:
+        - "4"
     evaluators:
-      - type: contains
-        expected: "4"
       - type: llm_judge
         criteria: "Response should be accurate and concise"
 ```

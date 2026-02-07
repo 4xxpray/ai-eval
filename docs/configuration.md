@@ -182,6 +182,9 @@ storage:
 | `ANTHROPIC_API_KEY` | Claude API key | High |
 | `ANTHROPIC_AUTH_TOKEN` | Claude auth token | Medium |
 | `OPENAI_API_KEY` | OpenAI API key | High |
+| `AI_EVAL_API_KEY` | API server key for `X-API-Key` authentication | High |
+| `AI_EVAL_DISABLE_AUTH` | Disable API server authentication when set to `true` | Medium |
+| `AI_EVAL_CORS_ORIGINS` | Enable CORS for the API server (`*` or comma-separated origins) | - |
 | `AI_EVAL_MMLU_PATH` | Custom MMLU dataset path | - |
 | `AI_EVAL_GSM8K_PATH` | Custom GSM8K dataset path | - |
 | `AI_EVAL_HUMANEVAL_PATH` | Custom HumanEval dataset path | - |

@@ -1,6 +1,6 @@
 module github.com/stellarlinkco/ai-eval
 
-go 1.23.0
+go 1.25.7
 
 require (
 	github.com/anthropics/anthropic-sdk-go v1.20.0

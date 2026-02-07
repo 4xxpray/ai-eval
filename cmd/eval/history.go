@@ -8,9 +8,9 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/spf13/cobra"
 	"github.com/stellarlinkco/ai-eval/internal/config"
 	"github.com/stellarlinkco/ai-eval/internal/store"
-	"github.com/spf13/cobra"
 )
 
 type historyOptions struct {

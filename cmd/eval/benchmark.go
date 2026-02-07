@@ -9,12 +9,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/spf13/cobra"
 	"github.com/stellarlinkco/ai-eval/internal/benchmark"
 	"github.com/stellarlinkco/ai-eval/internal/config"
 	"github.com/stellarlinkco/ai-eval/internal/leaderboard"
 	"github.com/stellarlinkco/ai-eval/internal/llm"
 	"github.com/stellarlinkco/ai-eval/internal/store"
-	"github.com/spf13/cobra"
 )
 
 type benchmarkOptions struct {

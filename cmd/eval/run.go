@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,15 +11,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/spf13/cobra"
 	"github.com/stellarlinkco/ai-eval/internal/app"
 	"github.com/stellarlinkco/ai-eval/internal/config"
 	"github.com/stellarlinkco/ai-eval/internal/evaluator"
 	"github.com/stellarlinkco/ai-eval/internal/llm"
-	"github.com/stellarlinkco/ai-eval/internal/prompt"
 	"github.com/stellarlinkco/ai-eval/internal/runner"
 	"github.com/stellarlinkco/ai-eval/internal/store"
-	"github.com/stellarlinkco/ai-eval/internal/testcase"
-	"github.com/spf13/cobra"
 )
 
 var errTestsFailed = errors.New("ai-eval: tests failed")
@@ -62,13 +59,6 @@ func newRunCmd(st *cliState) *cobra.Command {
 	cmd.Flags().BoolVar(&opts.ci, "ci", false, "force CI mode (github output and summaries)")
 
 	return cmd
-}
-
-type suiteRun struct {
-	promptName    string
-	promptVersion string
-	suite         *testcase.TestSuite
-	result        *runner.SuiteResult
 }
 
 func runEvaluations(cmd *cobra.Command, st *cliState, opts *runOptions) error {
@@ -123,7 +113,7 @@ func runEvaluations(cmd *cobra.Command, st *cliState, opts *runOptions) error {
 	if err != nil {
 		return err
 	}
-	promptByName, err := indexPrompts(prompts)
+	promptByName, err := app.IndexPrompts(prompts)
 	if err != nil {
 		return err
 	}
@@ -132,7 +122,7 @@ func runEvaluations(cmd *cobra.Command, st *cliState, opts *runOptions) error {
 	if err != nil {
 		return err
 	}
-	suitesByPrompt, err := indexSuitesByPrompt(suites, promptByName)
+	suitesByPrompt, err := app.IndexSuitesByPrompt(suites, promptByName)
 	if err != nil {
 		return err
 	}
@@ -177,7 +167,7 @@ func runEvaluations(cmd *cobra.Command, st *cliState, opts *runOptions) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	var runs []suiteRun
+	var runs []app.SuiteRun
 	for _, name := range promptNames {
 		p := promptByName[name]
 		suites := suitesByPrompt[name]
@@ -191,26 +181,26 @@ func runEvaluations(cmd *cobra.Command, st *cliState, opts *runOptions) error {
 			if err != nil {
 				return err
 			}
-			runs = append(runs, suiteRun{promptName: name, promptVersion: p.Version, suite: suite, result: res})
+			runs = append(runs, app.SuiteRun{PromptName: name, PromptVersion: p.Version, Suite: suite, Result: res})
 		}
 	}
 
 	finishedAt := time.Now().UTC()
 
-	anyFailed, summary := summarizeRuns(runs)
+	anyFailed, summary := app.SummarizeRuns(runs)
 	switch output {
 	case FormatTable:
 		if !opts.all && len(promptNames) == 1 {
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Prompt: %s\n\n", promptNames[0])
 		}
 		for _, r := range runs {
-			_, _ = fmt.Fprint(cmd.OutOrStdout(), FormatSuiteResult(r.result, FormatTable))
+			_, _ = fmt.Fprint(cmd.OutOrStdout(), FormatSuiteResult(r.Result, FormatTable))
 		}
 
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Summary: suites=%d cases=%d passed=%d failed=%d latency_ms=%d tokens=%d\n",
-			summary.totalSuites, summary.totalCases, summary.passedCases, summary.failedCases, summary.totalLatency, summary.totalTokens)
+			summary.TotalSuites, summary.TotalCases, summary.PassedCases, summary.FailedCases, summary.TotalLatency, summary.TotalTokens)
 
-		if summary.failedCases == 0 {
+		if summary.FailedCases == 0 {
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Overall: %s\n", coloredStatus(true))
 		} else {
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Overall: %s\n", coloredStatus(false))
@@ -221,16 +211,16 @@ func runEvaluations(cmd *cobra.Command, st *cliState, opts *runOptions) error {
 		}
 	case FormatGitHub:
 		for _, r := range runs {
-			res := r.result
+			res := r.Result
 			if res != nil && opts.all {
 				tmp := *res
-				tmp.Suite = fmt.Sprintf("%s (prompt=%s)", strings.TrimSpace(tmp.Suite), r.promptName)
+				tmp.Suite = fmt.Sprintf("%s (prompt=%s)", strings.TrimSpace(tmp.Suite), r.PromptName)
 				res = &tmp
 			}
 			_, _ = fmt.Fprint(cmd.OutOrStdout(), FormatSuiteResult(res, FormatGitHub))
 		}
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Summary: suites=%d cases=%d passed=%d failed=%d latency_ms=%d tokens=%d\n",
-			summary.totalSuites, summary.totalCases, summary.passedCases, summary.failedCases, summary.totalLatency, summary.totalTokens)
+			summary.TotalSuites, summary.TotalCases, summary.PassedCases, summary.FailedCases, summary.TotalLatency, summary.TotalTokens)
 	default:
 		return fmt.Errorf("run: internal error: unknown output format %q", output)
 	}
@@ -249,73 +239,6 @@ func runEvaluations(cmd *cobra.Command, st *cliState, opts *runOptions) error {
 	return nil
 }
 
-func indexPrompts(prompts []*prompt.Prompt) (map[string]*prompt.Prompt, error) {
-	out := make(map[string]*prompt.Prompt, len(prompts))
-	for _, p := range prompts {
-		if p == nil {
-			return nil, fmt.Errorf("run: nil prompt")
-		}
-		name := strings.TrimSpace(p.Name)
-		if name == "" {
-			return nil, fmt.Errorf("run: prompt with empty name")
-		}
-		if _, ok := out[name]; ok {
-			return nil, fmt.Errorf("run: duplicate prompt name %q", name)
-		}
-		out[name] = p
-	}
-	return out, nil
-}
-
-func indexSuitesByPrompt(suites []*testcase.TestSuite, promptByName map[string]*prompt.Prompt) (map[string][]*testcase.TestSuite, error) {
-	out := make(map[string][]*testcase.TestSuite)
-	for _, s := range suites {
-		if s == nil {
-			return nil, fmt.Errorf("run: nil test suite")
-		}
-		promptRef := strings.TrimSpace(s.Prompt)
-		if promptRef == "" {
-			return nil, fmt.Errorf("run: suite %q: missing prompt reference", s.Suite)
-		}
-		if _, ok := promptByName[promptRef]; !ok {
-			return nil, fmt.Errorf("run: suite %q references unknown prompt %q", s.Suite, promptRef)
-		}
-		out[promptRef] = append(out[promptRef], s)
-	}
-	return out, nil
-}
-
-type runSummary struct {
-	totalSuites  int
-	totalCases   int
-	passedCases  int
-	failedCases  int
-	totalLatency int64
-	totalTokens  int
-}
-
-func summarizeRuns(runs []suiteRun) (anyFailed bool, summary runSummary) {
-	summary.totalSuites = len(runs)
-	for _, r := range runs {
-		if r.result == nil {
-			anyFailed = true
-			continue
-		}
-		summary.totalCases += r.result.TotalCases
-		summary.passedCases += r.result.PassedCases
-		summary.failedCases += r.result.FailedCases
-		summary.totalLatency += r.result.TotalLatency
-		summary.totalTokens += r.result.TotalTokens
-		if r.result.FailedCases > 0 {
-			anyFailed = true
-		}
-	}
-	if summary.failedCases > 0 {
-		anyFailed = true
-	}
-	return anyFailed, summary
-}
-
 type jsonRunSuiteLine struct {
 	Prompt string           `json:"prompt"`
 	Result *jsonSuiteResult `json:"result,omitempty"`
@@ -324,32 +247,23 @@ type jsonRunSuiteLine struct {
 }
 
 type jsonRunSummaryLine struct {
-	Summary jsonRunSummary `json:"summary"`
+	Summary app.RunSummary `json:"summary"`
 }
 
-type jsonRunSummary struct {
-	TotalSuites  int   `json:"total_suites"`
-	TotalCases   int   `json:"total_cases"`
-	PassedCases  int   `json:"passed_cases"`
-	FailedCases  int   `json:"failed_cases"`
-	TotalLatency int64 `json:"total_latency_ms"`
-	TotalTokens  int   `json:"total_tokens"`
-}
-
-func printRunJSON(cmd *cobra.Command, runs []suiteRun, summary runSummary) error {
+func printRunJSON(cmd *cobra.Command, runs []app.SuiteRun, summary app.RunSummary) error {
 	out := cmd.OutOrStdout()
 
 	for _, r := range runs {
 		line := jsonRunSuiteLine{
-			Prompt: r.promptName,
+			Prompt: r.PromptName,
 		}
-		if r.result == nil {
+		if r.Result == nil {
 			line.Error = "nil suite result"
-			if r.suite != nil {
-				line.Suite = r.suite.Suite
+			if r.Suite != nil {
+				line.Suite = r.Suite.Suite
 			}
 		} else {
-			tmp := suiteResultToJSON(r.result)
+			tmp := suiteResultToJSON(r.Result)
 			line.Result = &tmp
 		}
 
@@ -361,14 +275,7 @@ func printRunJSON(cmd *cobra.Command, runs []suiteRun, summary runSummary) error
 	}
 
 	sumLine := jsonRunSummaryLine{
-		Summary: jsonRunSummary{
-			TotalSuites:  summary.totalSuites,
-			TotalCases:   summary.totalCases,
-			PassedCases:  summary.passedCases,
-			FailedCases:  summary.failedCases,
-			TotalLatency: summary.totalLatency,
-			TotalTokens:  summary.totalTokens,
-		},
+		Summary: summary,
 	}
 	b, err := json.Marshal(sumLine)
 	if err != nil {
@@ -378,7 +285,7 @@ func printRunJSON(cmd *cobra.Command, runs []suiteRun, summary runSummary) error
 	return nil
 }
 
-func saveRunToStore(ctx context.Context, st *cliState, runs []suiteRun, summary runSummary, startedAt, finishedAt time.Time, promptNames []string, all bool, output OutputFormat, trials int, threshold float64, concurrency int) error {
+func saveRunToStore(ctx context.Context, st *cliState, runs []app.SuiteRun, summary app.RunSummary, startedAt, finishedAt time.Time, promptNames []string, all bool, output OutputFormat, trials int, threshold float64, concurrency int) error {
 	if st == nil || st.cfg == nil {
 		return fmt.Errorf("run: missing config (internal error)")
 	}
@@ -392,79 +299,8 @@ func saveRunToStore(ctx context.Context, st *cliState, runs []suiteRun, summary 
 	}
 	defer stor.Close()
 
-	var writer store.RunWriter = stor
-
-	runID, err := newRunID()
-	if err != nil {
-		return fmt.Errorf("run: generate run id: %w", err)
-	}
-
-	passedSuites := 0
-	failedSuites := 0
-	for _, r := range runs {
-		if r.result != nil && r.result.FailedCases == 0 {
-			passedSuites++
-		} else {
-			failedSuites++
-		}
-	}
-
-	runRecord := &store.RunRecord{
-		ID:           runID,
-		StartedAt:    startedAt,
-		FinishedAt:   finishedAt,
-		TotalSuites:  summary.totalSuites,
-		PassedSuites: passedSuites,
-		FailedSuites: failedSuites,
-		Config:       buildRunConfig(st, promptNames, all, output, trials, threshold, concurrency),
-	}
-	if err := writer.SaveRun(ctx, runRecord); err != nil {
-		return fmt.Errorf("run: save run: %w", err)
-	}
-
-	for i, r := range runs {
-		if r.result == nil || r.suite == nil {
-			return fmt.Errorf("run: missing suite result")
-		}
-		caseResults := make([]store.CaseRecord, 0, len(r.result.Results))
-		for _, rr := range r.result.Results {
-			cr := store.CaseRecord{
-				CaseID:     rr.CaseID,
-				Passed:     rr.Passed,
-				Score:      rr.Score,
-				PassAtK:    rr.PassAtK,
-				PassExpK:   rr.PassExpK,
-				LatencyMs:  rr.LatencyMs,
-				TokensUsed: rr.TokensUsed,
-			}
-			if rr.Error != nil {
-				cr.Error = rr.Error.Error()
-			}
-			caseResults = append(caseResults, cr)
-		}
-
-		suiteRecord := &store.SuiteRecord{
-			ID:            fmt.Sprintf("%s_suite_%d", runID, i+1),
-			RunID:         runID,
-			PromptName:    r.promptName,
-			PromptVersion: r.promptVersion,
-			SuiteName:     r.suite.Suite,
-			TotalCases:    r.result.TotalCases,
-			PassedCases:   r.result.PassedCases,
-			FailedCases:   r.result.FailedCases,
-			PassRate:      r.result.PassRate,
-			AvgScore:      r.result.AvgScore,
-			TotalLatency:  r.result.TotalLatency,
-			TotalTokens:   r.result.TotalTokens,
-			CreatedAt:     finishedAt,
-			CaseResults:   caseResults,
-		}
-		if err := writer.SaveSuiteResult(ctx, suiteRecord); err != nil {
-			return fmt.Errorf("run: save suite result: %w", err)
-		}
-	}
-
-	return nil
+	_, err = app.SaveRun(ctx, stor, runs, summary, startedAt, finishedAt, buildRunConfig(st, promptNames, all, output, trials, threshold, concurrency))
+	return err
 }
 
 func buildRunConfig(st *cliState, promptNames []string, all bool, output OutputFormat, trials int, threshold float64, concurrency int) map[string]any {
@@ -482,12 +318,4 @@ func buildRunConfig(st *cliState, promptNames []string, all bool, output OutputF
 		cfg["timeout_ms"] = st.cfg.Evaluation.Timeout.Milliseconds()
 	}
 	return cfg
-}
-
-func newRunID() (string, error) {
-	var buf [8]byte
-	if _, err := rand.Read(buf[:]); err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("run_%s_%x", time.Now().UTC().Format("20060102T150405Z"), buf), nil
 }

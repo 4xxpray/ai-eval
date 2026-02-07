@@ -1,309 +1,310 @@
 # Evaluators Guide
 
-AI Eval provides a rich set of evaluators to assess LLM responses. This guide covers each evaluator type and how to use them effectively.
+AI Eval evaluates each test case using two independent mechanisms:
 
-## Basic Evaluators
+- `expected`: deterministic assertions (exact/contains/regex/json_schema/not_contains/tool_calls)
+- `evaluators`: optional LLM-based evaluators (judge, similarity, safety, RAG, agent)
 
-### exact
+A test case must define at least one `expected` assertion or at least one `evaluators` entry.
 
-Checks for an exact string match.
+## Where this lives
+
+These fields are part of `tests/*.yaml` suites:
 
 ```yaml
-evaluators:
-  - type: exact
-    expected: "Hello, World!"
+suite: hello-tests
+prompt: hello
+cases:
+  - id: greeting
+    input:
+      user_request: "Say hello"
+    expected:
+      contains:
+        - "hello"
+    evaluators:
+      - type: llm_judge
+        criteria: "Response should be friendly and concise"
+        score_threshold: 0.8
 ```
 
-**Options:**
-- `expected` (string): The exact string to match
-- `case_sensitive` (bool, default: true): Whether to perform case-sensitive matching
+## Expected assertions (`expected`)
+
+### exact_match
+
+Exact string match.
+
+```yaml
+expected:
+  exact_match: "Hello, world!"
+```
 
 ### contains
 
-Checks if the response contains a substring.
+Require the response to include **all** substrings.
 
 ```yaml
-evaluators:
-  - type: contains
-    expected: "hello"
+expected:
+  contains:
+    - "hello"
+    - "world"
 ```
-
-**Options:**
-- `expected` (string or array): Substring(s) to find
-- `case_sensitive` (bool, default: false): Case sensitivity
-- `all` (bool, default: false): When expected is an array, require all substrings
 
 ### not_contains
 
-Checks that the response does NOT contain certain strings.
+Require the response to **not** include any forbidden substrings.
 
 ```yaml
-evaluators:
-  - type: not_contains
-    expected:
-      - "error"
-      - "failed"
+expected:
+  not_contains:
+    - "I can't"
+    - "I won't"
 ```
 
 ### regex
 
-Matches response against a regular expression.
+Require the response to match **all** regex patterns (Go `regexp` syntax).
 
 ```yaml
-evaluators:
-  - type: regex
-    pattern: "\\d{4}-\\d{2}-\\d{2}"  # Date format YYYY-MM-DD
+expected:
+  regex:
+    - "^\\\\d{4}-\\\\d{2}-\\\\d{2}$"
 ```
 
-**Options:**
-- `pattern` (string): Regular expression pattern
-- `expected` (string): Alternative to `pattern`
-- `flags` (string): Regex flags (e.g., "i" for case-insensitive)
+### json_schema
 
-## Semantic Evaluators
+Require the response to be valid JSON matching a minimal schema object.
+
+```yaml
+expected:
+  json_schema:
+    type: object
+    required: ["name", "age"]
+    properties:
+      name: {type: string}
+      age: {type: integer}
+```
+
+### tool_calls
+
+Assert tool calls made by the model.
+
+```yaml
+expected:
+  tool_calls:
+    - name: get_weather
+      args_match:
+        location: "San Francisco"
+      order: 1
+      required: true
+```
+
+Notes:
+- `order` is 1-based. Use `0` (or omit) for unordered matching.
+- `args_match` is a subset match (only the provided keys must match).
+- String values in `args_match` may use `regex:<pattern>` to match tool arguments by regex.
+
+Example:
+
+```yaml
+expected:
+  tool_calls:
+    - name: search
+      args_match:
+        query: "regex:^golang\\\\s+error\\\\s+wrapping"
+      required: true
+```
+
+## Evaluators (`evaluators`)
+
+Each evaluator entry has:
+- `type` (required)
+- type-specific configuration fields
+- `score_threshold` (optional): pass threshold (meaning depends on evaluator type)
+
+Supported `type` values:
+`exact`, `contains`, `regex`, `json_schema`, `llm_judge`, `similarity`, `factuality`, `tool_call`,
+`faithfulness`, `relevancy`, `precision`,
+`task_completion`, `tool_selection`, `efficiency`,
+`hallucination`, `toxicity`, `bias`.
+
+For the simple types (`exact`, `contains`, `regex`, `json_schema`) the expected values still come from the
+`expected` block. In most cases you should configure them via `expected` only.
 
 ### llm_judge
 
-Uses an LLM to evaluate response quality against specified criteria.
+Scores a response against free-form criteria using an LLM.
 
 ```yaml
 evaluators:
   - type: llm_judge
     criteria: |
       The response should:
-      - Be accurate and factually correct
-      - Be concise (under 100 words)
-      - Use professional tone
+      - Be accurate
+      - Be concise
+    rubric:
+      - "Accuracy"
+      - "Clarity"
+    score_scale: 5
     score_threshold: 0.8
 ```
 
-**Options:**
-- `criteria` (string): Evaluation criteria description
-- `rubric` (array): Specific scoring dimensions
-- `score_scale` (int, default: 5): Rating scale (1-5 or 1-10)
-- `score_threshold` (float, default: 0.6): Minimum normalized score to pass
-- `context` (string): Additional context about the original question
+`criteria` is required. `score_threshold` is the minimum normalized score (0.0-1.0).
 
-**Example with rubric:**
+### similarity
+
+Semantic similarity against a reference answer.
 
 ```yaml
 evaluators:
-  - type: llm_judge
-    criteria: "Evaluate the code review quality"
-    rubric:
-      - "Identifies actual bugs or issues"
-      - "Provides constructive suggestions"
-      - "Explains reasoning clearly"
-      - "Follows coding best practices"
-    score_scale: 10
-    score_threshold: 0.7
+  - type: similarity
+    reference: "The capital of France is Paris."
+    score_threshold: 0.8
 ```
+
+`reference` is required. `score_threshold` is the minimum similarity score (0.0-1.0).
 
 ### factuality
 
-Evaluates factual accuracy of the response.
+Fact-check against ground truth.
 
 ```yaml
 evaluators:
   - type: factuality
-    expected:
-      facts:
-        - "Python was created by Guido van Rossum"
-        - "Python was first released in 1991"
+    ground_truth: |
+      Python was created by Guido van Rossum.
 ```
 
-### similarity
+`ground_truth` is required.
 
-Compares semantic similarity to a reference response.
+### faithfulness
+
+RAG faithfulness to retrieved context.
 
 ```yaml
 evaluators:
-  - type: similarity
-    expected:
-      reference: "The capital of France is Paris."
-      threshold: 0.8
+  - type: faithfulness
+    context: "Returns accepted within 30 days."
+    score_threshold: 0.8
 ```
 
-## Structured Output Evaluators
+`context` is required. `score_threshold` is the minimum score (0.0-1.0).
 
-### json_schema
+### relevancy
 
-Validates that response is valid JSON matching a schema.
+RAG/query relevancy.
 
 ```yaml
 evaluators:
-  - type: json_schema
-    expected:
-      type: object
-      required:
-        - name
-        - age
-      properties:
-        name:
-          type: string
-        age:
-          type: integer
-          minimum: 0
+  - type: relevancy
+    question: "What is the return policy?"
+    score_threshold: 0.8
 ```
 
-### tool_call
+`question` is required. `score_threshold` is the minimum score (0.0-1.0).
 
-Evaluates tool/function call responses.
+### precision
+
+Retrieval precision for a question/context pair.
 
 ```yaml
 evaluators:
-  - type: tool_call
-    expected:
-      name: "get_weather"
-      arguments:
-        location: "San Francisco"
+  - type: precision
+    question: "What is the return policy?"
+    context: "..."
+    score_threshold: 0.8
 ```
 
-**Options:**
-- `name` (string): Expected tool name
-- `arguments` (object): Expected arguments (partial match)
-- `strict` (bool): Require exact argument match
+`question` and `context` are required. Set `score_threshold` to enforce a minimum score.
 
-## Safety Evaluators
+### task_completion
 
-### safety/toxicity
-
-Detects toxic or harmful content.
+Agent task completion.
 
 ```yaml
 evaluators:
-  - type: toxicity
-    threshold: 0.1  # Max acceptable toxicity score
+  - type: task_completion
+    task: "Write a short summary of the document"
+    criteria_list:
+      - "Mentions the main conclusion"
+      - "Under 120 words"
+    score_threshold: 0.7
 ```
 
-### safety/bias
+`task` is required.
 
-Detects biased content.
+### tool_selection
+
+Score whether the agent used expected tools.
 
 ```yaml
 evaluators:
-  - type: bias
-    categories:
-      - gender
-      - race
-      - religion
+  - type: tool_selection
+    expected_tools: ["search", "calculate"]
+    score_threshold: 0.8
 ```
 
-### safety/hallucination
+### efficiency
 
-Detects hallucinated or fabricated information.
+Score against step/token budgets.
+
+```yaml
+evaluators:
+  - type: efficiency
+    max_steps: 5
+    max_tokens: 2000
+    score_threshold: 0.8
+```
+
+At least one of `max_steps` or `max_tokens` should be set.
+
+### hallucination
+
+Detect hallucinations against ground truth.
 
 ```yaml
 evaluators:
   - type: hallucination
-    expected:
-      context: "The meeting is scheduled for Tuesday at 3pm."
+    ground_truth: "The meeting is Tuesday at 3pm."
+    score_threshold: 0.9
 ```
 
-## Agent Evaluators
+`ground_truth` is required. `score_threshold` is the minimum consistency score (0.0-1.0).
 
-### agent/tool_selection
+### toxicity
 
-Evaluates whether the agent selected appropriate tools.
+Detect harmful/toxic content.
 
 ```yaml
 evaluators:
-  - type: agent/tool_selection
-    expected:
-      required_tools:
-        - search
-        - calculate
-      forbidden_tools:
-        - delete
+  - type: toxicity
+    score_threshold: 0.1
 ```
 
-### agent/efficiency
+`score_threshold` is the **maximum allowed** toxicity (0.0-1.0). Lower is stricter.
 
-Evaluates agent efficiency (steps, token usage).
+### bias
+
+Detect biased or discriminatory content.
 
 ```yaml
 evaluators:
-  - type: agent/efficiency
-    expected:
-      max_steps: 5
-      max_tokens: 2000
+  - type: bias
+    categories: ["gender", "race"]
+    score_threshold: 0.1
 ```
 
-## RAG Evaluators
+`score_threshold` is the **maximum allowed** bias (0.0-1.0). Lower is stricter.
 
-### rag/relevancy
+### tool_call (threshold for `expected.tool_calls`)
 
-Evaluates retrieval relevancy.
+If you use `expected.tool_calls`, you can optionally control pass/fail using a match-score threshold:
 
 ```yaml
 evaluators:
-  - type: rag/relevancy
-    expected:
-      query: "What is the return policy?"
-      threshold: 0.7
+  - type: tool_call
+    score_threshold: 0.8
 ```
 
-### rag/faithfulness
+## Combining checks
 
-Evaluates faithfulness to retrieved context.
-
-```yaml
-evaluators:
-  - type: rag/faithfulness
-    expected:
-      context: "Returns accepted within 30 days."
-```
-
-### rag/precision
-
-Evaluates precision of retrieved information.
-
-```yaml
-evaluators:
-  - type: rag/precision
-```
-
-## Combining Evaluators
-
-You can use multiple evaluators on a single test case. All evaluators must pass for the case to pass.
-
-```yaml
-cases:
-  - id: comprehensive-test
-    input:
-      question: "Summarize the document"
-    evaluators:
-      # Basic validation
-      - type: not_contains
-        expected:
-          - "I don't know"
-          - "I cannot"
-
-      # Length check via regex
-      - type: regex
-        pattern: "^.{100,500}$"  # Between 100-500 chars
-
-      # Quality check
-      - type: llm_judge
-        criteria: |
-          Summary should:
-          - Capture main points
-          - Be coherent and readable
-          - Not include irrelevant information
-```
-
-## Custom Score Thresholds
-
-Many evaluators support custom pass thresholds:
-
-```yaml
-evaluators:
-  - type: llm_judge
-    criteria: "High quality response"
-    score_threshold: 0.9  # Stricter than default 0.6
-
-  - type: similarity
-    expected:
-      reference: "Expected answer"
-      threshold: 0.95  # Very high similarity required
-```
+All configured assertions and evaluators must pass for the case to pass.

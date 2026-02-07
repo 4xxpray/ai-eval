@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/stellarlinkco/ai-eval/internal/app"
 	"github.com/stellarlinkco/ai-eval/internal/ci"
 )
 
@@ -18,7 +19,7 @@ type ciReport struct {
 	StartedAt  string          `json:"started_at"`
 	FinishedAt string          `json:"finished_at"`
 	Threshold  float64         `json:"threshold"`
-	Summary    jsonRunSummary  `json:"summary"`
+	Summary    app.RunSummary  `json:"summary"`
 	Suites     []ciSuiteReport `json:"suites"`
 }
 
@@ -53,7 +54,7 @@ func applyCIOutputDefaults(opts *runOptions, ciMode bool) {
 	}
 }
 
-func writeCIArtifacts(runs []suiteRun, summary runSummary, startedAt, finishedAt time.Time, threshold float64) {
+func writeCIArtifacts(runs []app.SuiteRun, summary app.RunSummary, startedAt, finishedAt time.Time, threshold float64) {
 	report := buildCIReport(runs, summary, startedAt, finishedAt, threshold)
 	if err := ci.SetJobSummary(buildCIMarkdown(report)); err != nil {
 		fmt.Fprintf(os.Stderr, "ci: write job summary: %v\n", err)
@@ -67,51 +68,44 @@ func writeCIArtifacts(runs []suiteRun, summary runSummary, startedAt, finishedAt
 	}
 }
 
-func buildCIReport(runs []suiteRun, summary runSummary, startedAt, finishedAt time.Time, threshold float64) ciReport {
+func buildCIReport(runs []app.SuiteRun, summary app.RunSummary, startedAt, finishedAt time.Time, threshold float64) ciReport {
 	report := ciReport{
 		StartedAt:  formatTime(startedAt),
 		FinishedAt: formatTime(finishedAt),
 		Threshold:  threshold,
-		Summary: jsonRunSummary{
-			TotalSuites:  summary.totalSuites,
-			TotalCases:   summary.totalCases,
-			PassedCases:  summary.passedCases,
-			FailedCases:  summary.failedCases,
-			TotalLatency: summary.totalLatency,
-			TotalTokens:  summary.totalTokens,
-		},
-		Suites: make([]ciSuiteReport, 0, len(runs)),
+		Summary:    summary,
+		Suites:     make([]ciSuiteReport, 0, len(runs)),
 	}
 
 	for _, r := range runs {
 		suiteName := ""
-		if r.suite != nil {
-			suiteName = r.suite.Suite
+		if r.Suite != nil {
+			suiteName = r.Suite.Suite
 		}
-		if suiteName == "" && r.result != nil {
-			suiteName = r.result.Suite
+		if suiteName == "" && r.Result != nil {
+			suiteName = r.Result.Suite
 		}
 
 		entry := ciSuiteReport{
-			Prompt:        r.promptName,
-			PromptVersion: r.promptVersion,
+			Prompt:        r.PromptName,
+			PromptVersion: r.PromptVersion,
 			Suite:         suiteName,
 		}
 
-		if r.result == nil {
+		if r.Result == nil {
 			entry.Error = "nil suite result"
 			report.Suites = append(report.Suites, entry)
 			continue
 		}
 
-		entry.TotalCases = r.result.TotalCases
-		entry.PassedCases = r.result.PassedCases
-		entry.FailedCases = r.result.FailedCases
-		entry.PassRate = r.result.PassRate
-		entry.AvgScore = r.result.AvgScore
-		entry.TotalLatency = r.result.TotalLatency
-		entry.TotalTokens = r.result.TotalTokens
-		entry.Passed = r.result.FailedCases == 0
+		entry.TotalCases = r.Result.TotalCases
+		entry.PassedCases = r.Result.PassedCases
+		entry.FailedCases = r.Result.FailedCases
+		entry.PassRate = r.Result.PassRate
+		entry.AvgScore = r.Result.AvgScore
+		entry.TotalLatency = r.Result.TotalLatency
+		entry.TotalTokens = r.Result.TotalTokens
+		entry.Passed = r.Result.FailedCases == 0
 
 		report.Suites = append(report.Suites, entry)
 	}

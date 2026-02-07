@@ -33,7 +33,7 @@ func main() {
 	}
 	defer st.Close()
 
-		lb, err := openLeaderboardStore(cfg)
+	lb, err := openLeaderboardStore(cfg)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

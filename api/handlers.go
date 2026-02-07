@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"crypto/rand"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -15,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gin-gonic/gin"
+	"github.com/stellarlinkco/ai-eval/internal/app"
 	"github.com/stellarlinkco/ai-eval/internal/evaluator"
 	"github.com/stellarlinkco/ai-eval/internal/generator"
 	"github.com/stellarlinkco/ai-eval/internal/optimizer"
@@ -22,7 +23,6 @@ import (
 	"github.com/stellarlinkco/ai-eval/internal/runner"
 	"github.com/stellarlinkco/ai-eval/internal/store"
 	"github.com/stellarlinkco/ai-eval/internal/testcase"
-	"github.com/gin-gonic/gin"
 	"gopkg.in/yaml.v3"
 )
 
@@ -43,22 +43,6 @@ type compareRequest struct {
 	Prompt string `json:"prompt"`
 	V1     string `json:"v1"`
 	V2     string `json:"v2"`
-}
-
-type runSummary struct {
-	TotalSuites  int   `json:"total_suites"`
-	TotalCases   int   `json:"total_cases"`
-	PassedCases  int   `json:"passed_cases"`
-	FailedCases  int   `json:"failed_cases"`
-	TotalLatency int64 `json:"total_latency_ms"`
-	TotalTokens  int   `json:"total_tokens"`
-}
-
-type suiteRun struct {
-	promptName    string
-	promptVersion string
-	suite         *testcase.TestSuite
-	result        *runner.SuiteResult
 }
 
 func (s *Server) handleHealth(c *gin.Context) {
@@ -292,7 +276,7 @@ func (s *Server) handleStartRun(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, err)
 		return
 	}
-	promptByName, err := indexPrompts(prompts)
+	promptByName, err := app.IndexPrompts(prompts)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, err)
 		return
@@ -303,7 +287,7 @@ func (s *Server) handleStartRun(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, err)
 		return
 	}
-	suitesByPrompt, err := indexSuitesByPrompt(suites, promptByName)
+	suitesByPrompt, err := app.IndexSuitesByPrompt(suites, promptByName)
 	if err != nil {
 		respondError(c, http.StatusBadRequest, err)
 		return
@@ -344,7 +328,7 @@ func (s *Server) handleStartRun(c *gin.Context) {
 	ctx := c.Request.Context()
 	startedAt := time.Now().UTC()
 
-	var runs []suiteRun
+	var runs []app.SuiteRun
 	for _, name := range promptNames {
 		p := promptByName[name]
 		suites := suitesByPrompt[name]
@@ -360,14 +344,14 @@ func (s *Server) handleStartRun(c *gin.Context) {
 				respondError(c, http.StatusInternalServerError, err)
 				return
 			}
-			runs = append(runs, suiteRun{promptName: name, promptVersion: p.Version, suite: suite, result: res})
+			runs = append(runs, app.SuiteRun{PromptName: name, PromptVersion: p.Version, Suite: suite, Result: res})
 		}
 	}
 
 	finishedAt := time.Now().UTC()
-	summary := summarizeRuns(runs)
+	_, summary := app.SummarizeRuns(runs)
 
-	runRecord, err := s.saveRun(ctx, runs, summary, startedAt, finishedAt, promptNames, req.All, trials, threshold, concurrency)
+	runRecord, err := app.SaveRun(ctx, s.store, runs, summary, startedAt, finishedAt, s.buildRunConfig(promptNames, req.All, trials, threshold, concurrency))
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, err)
 		return
@@ -812,141 +796,6 @@ func compactSuites(suites []*testcase.TestSuite) []*testcase.TestSuite {
 	return out
 }
 
-func indexPrompts(prompts []*prompt.Prompt) (map[string]*prompt.Prompt, error) {
-	out := make(map[string]*prompt.Prompt, len(prompts))
-	for _, p := range prompts {
-		if p == nil {
-			return nil, fmt.Errorf("run: nil prompt")
-		}
-		name := strings.TrimSpace(p.Name)
-		if name == "" {
-			return nil, fmt.Errorf("run: prompt with empty name")
-		}
-		if _, ok := out[name]; ok {
-			return nil, fmt.Errorf("run: duplicate prompt name %q", name)
-		}
-		out[name] = p
-	}
-	return out, nil
-}
-
-func indexSuitesByPrompt(suites []*testcase.TestSuite, promptByName map[string]*prompt.Prompt) (map[string][]*testcase.TestSuite, error) {
-	out := make(map[string][]*testcase.TestSuite)
-	for _, s := range suites {
-		if s == nil {
-			return nil, fmt.Errorf("run: nil test suite")
-		}
-		promptRef := strings.TrimSpace(s.Prompt)
-		if promptRef == "" {
-			return nil, fmt.Errorf("run: suite %q: missing prompt reference", s.Suite)
-		}
-		if _, ok := promptByName[promptRef]; !ok {
-			return nil, fmt.Errorf("run: suite %q references unknown prompt %q", s.Suite, promptRef)
-		}
-		out[promptRef] = append(out[promptRef], s)
-	}
-	return out, nil
-}
-
-func summarizeRuns(runs []suiteRun) runSummary {
-	summary := runSummary{TotalSuites: len(runs)}
-	for _, r := range runs {
-		if r.result == nil {
-			continue
-		}
-		summary.TotalCases += r.result.TotalCases
-		summary.PassedCases += r.result.PassedCases
-		summary.FailedCases += r.result.FailedCases
-		summary.TotalLatency += r.result.TotalLatency
-		summary.TotalTokens += r.result.TotalTokens
-	}
-	return summary
-}
-
-func (s *Server) saveRun(ctx context.Context, runs []suiteRun, summary runSummary, startedAt, finishedAt time.Time, promptNames []string, all bool, trials int, threshold float64, concurrency int) (*store.RunRecord, error) {
-	if s == nil || s.store == nil {
-		return nil, errors.New("server: missing store")
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
-	runID, err := newRunID()
-	if err != nil {
-		return nil, err
-	}
-
-	passedSuites := 0
-	failedSuites := 0
-	for _, r := range runs {
-		if r.result != nil && r.result.FailedCases == 0 {
-			passedSuites++
-		} else {
-			failedSuites++
-		}
-	}
-
-	runRecord := &store.RunRecord{
-		ID:           runID,
-		StartedAt:    startedAt,
-		FinishedAt:   finishedAt,
-		TotalSuites:  summary.TotalSuites,
-		PassedSuites: passedSuites,
-		FailedSuites: failedSuites,
-		Config:       s.buildRunConfig(promptNames, all, trials, threshold, concurrency),
-	}
-
-	if err := s.store.SaveRun(ctx, runRecord); err != nil {
-		return nil, err
-	}
-
-	for i, r := range runs {
-		if r.result == nil || r.suite == nil {
-			return nil, errors.New("run: missing suite result")
-		}
-
-		caseResults := make([]store.CaseRecord, 0, len(r.result.Results))
-		for _, rr := range r.result.Results {
-			cr := store.CaseRecord{
-				CaseID:     rr.CaseID,
-				Passed:     rr.Passed,
-				Score:      rr.Score,
-				PassAtK:    rr.PassAtK,
-				PassExpK:   rr.PassExpK,
-				LatencyMs:  rr.LatencyMs,
-				TokensUsed: rr.TokensUsed,
-			}
-			if rr.Error != nil {
-				cr.Error = rr.Error.Error()
-			}
-			caseResults = append(caseResults, cr)
-		}
-
-		suiteRecord := &store.SuiteRecord{
-			ID:            fmt.Sprintf("%s_suite_%d", runID, i+1),
-			RunID:         runID,
-			PromptName:    r.promptName,
-			PromptVersion: r.promptVersion,
-			SuiteName:     r.suite.Suite,
-			TotalCases:    r.result.TotalCases,
-			PassedCases:   r.result.PassedCases,
-			FailedCases:   r.result.FailedCases,
-			PassRate:      r.result.PassRate,
-			AvgScore:      r.result.AvgScore,
-			TotalLatency:  r.result.TotalLatency,
-			TotalTokens:   r.result.TotalTokens,
-			CreatedAt:     finishedAt,
-			CaseResults:   caseResults,
-		}
-
-		if err := s.store.SaveSuiteResult(ctx, suiteRecord); err != nil {
-			return nil, err
-		}
-	}
-
-	return runRecord, nil
-}
-
 func (s *Server) buildRunConfig(promptNames []string, all bool, trials int, threshold float64, concurrency int) map[string]any {
 	cfg := map[string]any{
 		"trials":      trials,
@@ -961,14 +810,6 @@ func (s *Server) buildRunConfig(promptNames []string, all bool, trials int, thre
 		cfg["timeout_ms"] = s.config.Evaluation.Timeout.Milliseconds()
 	}
 	return cfg
-}
-
-func newRunID() (string, error) {
-	var buf [8]byte
-	if _, err := rand.Read(buf[:]); err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("run_%s_%x", time.Now().UTC().Format("20060102T150405Z"), buf), nil
 }
 
 type optimizeRequest struct {

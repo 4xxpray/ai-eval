@@ -1,348 +1,295 @@
 # API Reference
 
-AI Eval provides a REST API for programmatic access to evaluation features.
+AI Eval exposes a REST API under the `/api` prefix.
 
 ## Starting the Server
 
+The server listens on `:8080` by default and supports:
+- `-addr` (default `:8080`)
+- `-config` (default `configs/config.yaml`)
+
+For local development, explicitly disable API auth:
+
 ```bash
-go run ./cmd/server
-# or
-./eval-server
+AI_EVAL_DISABLE_AUTH=true go run ./cmd/server -addr :8080
 ```
 
-Default port: `8080`
+Or build a standalone binary:
+
+```bash
+go build -o eval-server ./cmd/server
+AI_EVAL_DISABLE_AUTH=true ./eval-server -addr :8080
+```
+
+Note: the API reads/writes `prompts/` and `tests/` relative to the process working directory.
+
+## Authentication
+
+The API server **requires** one of the following at startup:
+
+- Set `AI_EVAL_API_KEY` to enable API key auth (send `X-API-Key: <key>` on requests)
+- Or set `AI_EVAL_DISABLE_AUTH=true` to explicitly disable authentication (recommended only for local/trusted environments)
+
+If neither is set, the server refuses to start.
+
+Unauthorized requests return:
+
+```json
+{"error":"unauthorized"}
+```
+
+## CORS
+
+CORS headers are **disabled by default**. Enable them by setting `AI_EVAL_CORS_ORIGINS`:
+
+- Allow any origin: `AI_EVAL_CORS_ORIGINS="*"`
+- Allow a fixed list (comma-separated): `AI_EVAL_CORS_ORIGINS="http://localhost:3000, https://example.com"`
+
+When enabled, the server allows:
+- Methods: `GET,POST,DELETE,OPTIONS`
+- Headers: `Content-Type, X-API-Key`
+
+## Error Responses
+
+All API errors use this format:
+
+```json
+{"error":"<message>"}
+```
+
+## JSON Field Naming
+
+Some endpoints return Go structs without explicit `json` tags, so response keys are exported Go field names
+(e.g. `Name`, `Suite`, `StartedAt`).
 
 ## Endpoints
 
-### Health Check
+### Health
 
 ```
-GET /health
-```
-
-**Response:**
-
-```json
-{"status": "ok"}
-```
-
-### Run Evaluation
-
-```
-POST /api/v1/evaluate
-```
-
-**Request Body:**
-
-```json
-{
-  "prompt": "example",
-  "input": {
-    "user_request": "Hello world"
-  },
-  "evaluators": [
-    {
-      "type": "contains",
-      "expected": "hello"
-    },
-    {
-      "type": "llm_judge",
-      "criteria": "Response should be friendly"
-    }
-  ]
-}
+GET /api/health
 ```
 
 **Response:**
 
 ```json
-{
-  "passed": true,
-  "score": 1.0,
-  "response": "Hello! How can I help you today?",
-  "evaluations": [
-    {
-      "type": "contains",
-      "passed": true,
-      "score": 1.0,
-      "message": "Found expected substring"
-    },
-    {
-      "type": "llm_judge",
-      "passed": true,
-      "score": 0.95,
-      "message": "Response is friendly and helpful"
-    }
-  ],
-  "latency_ms": 1234,
-  "tokens_used": 150
-}
+{"status":"ok","time":"2026-02-07T05:08:34Z"}
 ```
 
-### Run Test Suite
+### Prompts
+
+List prompts:
 
 ```
-POST /api/v1/suite
+GET /api/prompts
 ```
 
-**Request Body:**
+Optional query parameters:
+- `name`: case-insensitive exact match filter
 
-```json
-{
-  "prompt": "example",
-  "suite": "example-tests",
-  "trials": 3
-}
-```
-
-**Response:**
-
-```json
-{
-  "suite": "example-tests",
-  "total_cases": 5,
-  "passed_cases": 4,
-  "failed_cases": 1,
-  "pass_rate": 0.8,
-  "avg_score": 0.85,
-  "results": [
-    {
-      "case_id": "test-1",
-      "passed": true,
-      "score": 1.0,
-      "pass_at_k": 1.0
-    }
-  ]
-}
-```
-
-### List Prompts
+Get one prompt:
 
 ```
-GET /api/v1/prompts
+GET /api/prompts/{name}
 ```
 
-**Response:**
-
-```json
-{
-  "prompts": [
-    {
-      "name": "example",
-      "version": "1.0",
-      "is_system_prompt": true
-    },
-    {
-      "name": "code-review",
-      "version": "2.1",
-      "is_system_prompt": true
-    }
-  ]
-}
-```
-
-### Get Prompt
+Upsert a prompt (writes `prompts/<name>.yaml`):
 
 ```
-GET /api/v1/prompts/{name}
+POST /api/prompts
 ```
 
-**Response:**
+**Request Body (keys are case-insensitive):**
 
 ```json
 {
   "name": "example",
-  "version": "1.0",
-  "is_system_prompt": true,
-  "template": "You are a helpful assistant...\n\nUser: {{.user_request}}"
+  "version": "v1",
+  "description": "example prompt",
+  "template": "hello"
 }
 ```
 
-### List Test Suites
+Delete a prompt:
 
 ```
-GET /api/v1/suites
+DELETE /api/prompts/{name}
 ```
 
-**Response:**
+Returns `204 No Content` on success.
 
-```json
-{
-  "suites": [
-    {
-      "name": "example-tests",
-      "prompt": "example",
-      "case_count": 5
-    }
-  ]
-}
-```
+### Tests
 
-### Leaderboard
+List test suites:
 
 ```
-GET /api/v1/leaderboard?dataset=mmlu&top=10
+GET /api/tests
 ```
 
-**Query Parameters:**
-- `dataset` (required): Benchmark dataset name
-- `top` (optional, default: 20): Number of entries
+Optional query parameters:
+- `prompt`: case-insensitive exact match filter
 
-**Response:**
-
-```json
-{
-  "dataset": "mmlu",
-  "entries": [
-    {
-      "rank": 1,
-      "model": "claude-sonnet-4-5-20250929",
-      "provider": "claude",
-      "score": 1.0,
-      "accuracy": 1.0,
-      "latency_ms": 14444,
-      "date": "2026-02-07T05:08:34Z"
-    }
-  ]
-}
-```
-
-### Run Benchmark
+Get one suite:
 
 ```
-POST /api/v1/benchmark
+GET /api/tests/{suite}
+```
+
+Responses are `TestSuite` objects (including `Cases`).
+
+### Runs
+
+Start a run (runs suites from `tests/` against prompts in `prompts/`):
+
+```
+POST /api/runs
 ```
 
 **Request Body:**
 
 ```json
-{
-  "dataset": "mmlu",
-  "provider": "claude",
-  "model": "claude-sonnet-4-5-20250929",
-  "sample_size": 100
-}
+{"prompt":"example","trials":3,"threshold":0.8,"concurrency":4}
 ```
 
-**Response:**
+Or run all prompts:
+
+```json
+{"all":true}
+```
+
+**Response:** `201 Created`
 
 ```json
 {
-  "id": 1,
-  "dataset": "mmlu",
-  "provider": "claude",
-  "model": "claude-sonnet-4-5-20250929",
-  "score": 0.98,
-  "accuracy": 0.98,
-  "total_time_ms": 145678,
-  "total_tokens": 12345
-}
-```
-
-### Optimize Prompt
-
-```
-POST /api/v1/optimize
-```
-
-**Request Body:**
-
-```json
-{
-  "prompt": "example",
-  "iterations": 3,
-  "strategy": "iterative"
-}
-```
-
-**Response:**
-
-```json
-{
-  "original_score": 0.75,
-  "optimized_score": 0.92,
-  "iterations": 3,
-  "suggestions": [
-    "Add explicit output format instructions",
-    "Include example responses"
-  ],
-  "optimized_template": "..."
-}
-```
-
-## Error Responses
-
-All endpoints return errors in this format:
-
-```json
-{
-  "error": {
-    "code": "INVALID_REQUEST",
-    "message": "Missing required field: prompt"
+  "run": {
+    "ID": "run_20260207T050834Z_deadbeef...",
+    "StartedAt": "2026-02-07T05:08:34Z",
+    "FinishedAt": "2026-02-07T05:08:40Z",
+    "TotalSuites": 1,
+    "PassedSuites": 1,
+    "FailedSuites": 0,
+    "Config": {"trials":3,"threshold":0.8,"concurrency":4,"all":false,"prompts":["example"]}
+  },
+  "summary": {
+    "total_suites": 1,
+    "total_cases": 10,
+    "passed_cases": 10,
+    "failed_cases": 0,
+    "total_latency_ms": 12345,
+    "total_tokens": 6789
   }
 }
 ```
 
-**Error Codes:**
-- `INVALID_REQUEST`: Bad request parameters
-- `NOT_FOUND`: Resource not found
-- `PROVIDER_ERROR`: LLM provider error
-- `TIMEOUT`: Request timeout
-- `INTERNAL_ERROR`: Internal server error
+List runs:
 
-## Authentication
+```
+GET /api/runs
+```
 
-The API server does not require authentication by default. For production use, consider:
+Query parameters:
+- `limit` (default `20`, must be `> 0`)
+- `since` / `until`: RFC3339 or `YYYY-MM-DD`
+- `prompt` / `version`: filters
 
-1. Running behind a reverse proxy with authentication
-2. Implementing API key middleware
-3. Using network-level access controls
+Get one run:
 
-## Rate Limiting
+```
+GET /api/runs/{id}
+```
 
-No built-in rate limiting. LLM provider rate limits apply to all requests.
+Get suite results for a run:
 
-## CORS
+```
+GET /api/runs/{id}/results
+```
 
-CORS is enabled for all origins by default. Configure in production as needed.
+### History
+
+```
+GET /api/history/{prompt}
+```
+
+Optional query parameters:
+- `limit` (default `20`, must be `> 0`)
+
+Returns a list of `SuiteRecord` entries.
+
+### Compare
+
+```
+POST /api/compare
+```
+
+**Request Body:**
+
+```json
+{"prompt":"example","v1":"v1","v2":"v2"}
+```
+
+Returns a `VersionComparison` object.
+
+### Leaderboard
+
+Get leaderboard entries:
+
+```
+GET /api/leaderboard?dataset=mmlu&limit=20
+```
+
+Query parameters:
+- `dataset` (required)
+- `limit` (optional, default `20`, max `100`)
+
+Returns a JSON array of entries.
+
+Get model history:
+
+```
+GET /api/leaderboard/history?model=m1&dataset=gsm8k
+```
+
+### Optimize
+
+```
+POST /api/optimize
+```
+
+**Request Body:**
+
+```json
+{"prompt_content":"...","prompt_name":"example","num_cases":5}
+```
+
+Returns fields like `analysis`, `suggestions`, `eval_results`, `optimized_prompt`, `changes`,
+and `optimization_summary`.
+
+### Diagnose
+
+```
+POST /api/diagnose
+```
+
+**Request Body:**
+
+```json
+{"prompt_content":"...","tests_yaml":"<YAML>","max_suggestions":5}
+```
+
+Returns `suites` (summary) and `diagnosis` (details).
 
 ## Example: cURL
 
 ```bash
-# Run single evaluation
-curl -X POST http://localhost:8080/api/v1/evaluate \
+# No auth (only if AI_EVAL_DISABLE_AUTH=true)
+curl "http://localhost:8080/api/health"
+
+# API key auth (only if AI_EVAL_API_KEY is set on the server)
+curl "http://localhost:8080/api/health" -H "X-API-Key: $AI_EVAL_API_KEY"
+
+# Start a run
+curl -X POST "http://localhost:8080/api/runs" \
   -H "Content-Type: application/json" \
-  -d '{
-    "prompt": "example",
-    "input": {"user_request": "Hello"},
-    "evaluators": [{"type": "contains", "expected": "hello"}]
-  }'
-
-# Get leaderboard
-curl "http://localhost:8080/api/v1/leaderboard?dataset=mmlu&top=5"
-```
-
-## Example: Python
-
-```python
-import requests
-
-base_url = "http://localhost:8080/api/v1"
-
-# Run evaluation
-response = requests.post(f"{base_url}/evaluate", json={
-    "prompt": "example",
-    "input": {"user_request": "Hello"},
-    "evaluators": [
-        {"type": "contains", "expected": "hello"}
-    ]
-})
-print(response.json())
-
-# Get leaderboard
-response = requests.get(f"{base_url}/leaderboard", params={
-    "dataset": "mmlu",
-    "top": 10
-})
-print(response.json())
+  -H "X-API-Key: $AI_EVAL_API_KEY" \
+  -d '{"prompt":"example","trials":3,"threshold":0.8,"concurrency":4}'
 ```
