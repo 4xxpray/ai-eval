@@ -3,10 +3,12 @@ package optimizer
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/stellarlinkco/ai-eval/internal/evaluator"
+	"github.com/stellarlinkco/ai-eval/internal/llm"
 	"github.com/stellarlinkco/ai-eval/internal/runner"
 )
 
@@ -220,9 +222,9 @@ func TestTrimStringSlice(t *testing.T) {
 func TestNormalizeSuggestions(t *testing.T) {
 	input := []FixSuggestion{
 		{ID: "S3", Type: "add", Description: "d3", Priority: 3},
-		{ID: "", Type: "add", Description: "skip"},           // missing ID
-		{ID: "S1", Type: "", Description: "skip"},            // missing type
-		{ID: "S2", Type: "add", Description: ""},             // missing description
+		{ID: "", Type: "add", Description: "skip"},               // missing ID
+		{ID: "S1", Type: "", Description: "skip"},                // missing type
+		{ID: "S2", Type: "add", Description: ""},                 // missing description
 		{ID: "S1", Type: "add", Description: "d1", Priority: 0},  // priority defaults to 3
 		{ID: "S4", Type: "add", Description: "d4", Priority: 10}, // priority capped to 5
 	}
@@ -356,5 +358,119 @@ func TestIndentBlock(t *testing.T) {
 	got = indentBlock("a\r\nb", "> ")
 	if got != "> a\n> b" {
 		t.Errorf("unexpected CRLF handling: %q", got)
+	}
+}
+
+type recordingProvider struct {
+	lastRequest *llm.Request
+	response    *llm.Response
+	err         error
+}
+
+func (p *recordingProvider) Name() string { return "recording" }
+func (p *recordingProvider) Complete(_ context.Context, req *llm.Request) (*llm.Response, error) {
+	p.lastRequest = req
+	return p.response, p.err
+}
+func (p *recordingProvider) CompleteWithTools(_ context.Context, _ *llm.Request) (*llm.EvalResult, error) {
+	return nil, nil
+}
+
+func TestDiagnose_MaxSuggestionsHardCap20(t *testing.T) {
+	t.Parallel()
+
+	var sb strings.Builder
+	sb.WriteString(`{"failure_patterns":[],"root_causes":[],"suggestions":[`)
+	for i := 1; i <= 25; i++ {
+		if i > 1 {
+			sb.WriteByte(',')
+		}
+		sb.WriteString(fmt.Sprintf(`{"id":"S%d","type":"add_context","description":"d","priority":1}`, i))
+	}
+	sb.WriteString(`]}`)
+
+	a := &Advisor{Provider: &mockProvider{name: "test", response: textResponse(sb.String())}}
+	result, err := a.Diagnose(context.Background(), &DiagnoseRequest{
+		PromptContent:  "prompt",
+		MaxSuggestions: 100,
+	})
+	if err != nil {
+		t.Fatalf("Diagnose: %v", err)
+	}
+	if len(result.Suggestions) != 20 {
+		t.Fatalf("len(Suggestions): got %d want %d", len(result.Suggestions), 20)
+	}
+}
+
+func TestDiagnose_IncludesPatternHintsInPrompt(t *testing.T) {
+	t.Parallel()
+
+	p := &recordingProvider{
+		response: textResponse(`{"failure_patterns":[],"root_causes":[],"suggestions":[]}`),
+	}
+	a := &Advisor{Provider: p}
+
+	_, err := a.Diagnose(context.Background(), &DiagnoseRequest{
+		PromptContent:  "invalid json",
+		EvalResults:    nil,
+		MaxSuggestions: 1,
+	})
+	if err != nil {
+		t.Fatalf("Diagnose: %v", err)
+	}
+	if p.lastRequest == nil || len(p.lastRequest.Messages) != 1 {
+		t.Fatalf("provider request not recorded")
+	}
+	if !strings.Contains(p.lastRequest.Messages[0].Content, "output_format_unclear") {
+		t.Fatalf("expected pattern hint in prompt, got: %q", p.lastRequest.Messages[0].Content)
+	}
+}
+
+func TestDiagnose_ParseError(t *testing.T) {
+	t.Parallel()
+
+	a := &Advisor{Provider: &mockProvider{name: "test", response: textResponse("{bad}")}}
+	_, err := a.Diagnose(context.Background(), &DiagnoseRequest{PromptContent: "prompt"})
+	if err == nil {
+		t.Fatalf("Diagnose: expected error")
+	}
+	if !strings.Contains(err.Error(), "failed to parse response") {
+		t.Fatalf("Diagnose: got %v", err)
+	}
+}
+
+func TestFormatEvalResultsForDiagnosis_IncludesErrorAndSkipsEmptyEvidence(t *testing.T) {
+	t.Parallel()
+
+	results := []*runner.SuiteResult{{
+		Suite:       "suite1",
+		PassRate:    0.0,
+		PassedCases: 0,
+		TotalCases:  1,
+		AvgScore:    0.0,
+		Results: []runner.RunResult{
+			{
+				CaseID:  "c1",
+				Passed:  false,
+				Score:   0.1,
+				PassAtK: 0.0,
+				Error:   errors.New("boom"),
+				Trials: []runner.TrialResult{
+					{Passed: true},
+					{Passed: false, Response: "   ", Evaluations: []evaluator.Result{{Passed: false, Message: "  "}}},
+				},
+			},
+		},
+	}}
+
+	got := formatEvalResultsForDiagnosis(results)
+	if !strings.Contains(got, "Error: boom") {
+		t.Fatalf("expected error evidence, got: %q", got)
+	}
+	if strings.Contains(got, "Response (sample):") {
+		t.Fatalf("did not expect response sample for blank response, got: %q", got)
+	}
+	if strings.Contains(got, "Failed:") {
+		t.Fatalf("did not expect failure line for blank message, got: %q", got)
 	}
 }

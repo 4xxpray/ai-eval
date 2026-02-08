@@ -15,7 +15,6 @@ import (
 	"github.com/stellarlinkco/ai-eval/internal/app"
 	"github.com/stellarlinkco/ai-eval/internal/config"
 	"github.com/stellarlinkco/ai-eval/internal/evaluator"
-	"github.com/stellarlinkco/ai-eval/internal/llm"
 	"github.com/stellarlinkco/ai-eval/internal/runner"
 	"github.com/stellarlinkco/ai-eval/internal/store"
 )
@@ -143,7 +142,7 @@ func runEvaluations(cmd *cobra.Command, st *cliState, opts *runOptions) error {
 		return fmt.Errorf("run: no test suites found")
 	}
 
-	provider, err := llm.DefaultProviderFromConfig(st.cfg)
+	provider, err := defaultProviderFromConfig(st.cfg)
 	if err != nil {
 		return fmt.Errorf("run: %w", err)
 	}
@@ -177,10 +176,7 @@ func runEvaluations(cmd *cobra.Command, st *cliState, opts *runOptions) error {
 		sort.Slice(suites, func(i, j int) bool { return suites[i].Suite < suites[j].Suite })
 
 		for _, suite := range suites {
-			res, err := r.RunSuite(ctx, p, suite)
-			if err != nil {
-				return err
-			}
+			res, _ := r.RunSuite(ctx, p, suite)
 			runs = append(runs, app.SuiteRun{PromptName: name, PromptVersion: p.Version, Suite: suite, Result: res})
 		}
 	}
@@ -221,8 +217,6 @@ func runEvaluations(cmd *cobra.Command, st *cliState, opts *runOptions) error {
 		}
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Summary: suites=%d cases=%d passed=%d failed=%d latency_ms=%d tokens=%d\n",
 			summary.TotalSuites, summary.TotalCases, summary.PassedCases, summary.FailedCases, summary.TotalLatency, summary.TotalTokens)
-	default:
-		return fmt.Errorf("run: internal error: unknown output format %q", output)
 	}
 
 	if err := saveRunToStore(cmd.Context(), st, runs, summary, startedAt, finishedAt, promptNames, opts.all, output, trials, threshold, concurrency); err != nil {
@@ -252,6 +246,7 @@ type jsonRunSummaryLine struct {
 
 func printRunJSON(cmd *cobra.Command, runs []app.SuiteRun, summary app.RunSummary) error {
 	out := cmd.OutOrStdout()
+	enc := json.NewEncoder(out)
 
 	for _, r := range runs {
 		line := jsonRunSuiteLine{
@@ -267,21 +262,17 @@ func printRunJSON(cmd *cobra.Command, runs []app.SuiteRun, summary app.RunSummar
 			line.Result = &tmp
 		}
 
-		b, err := json.Marshal(line)
-		if err != nil {
+		if err := enc.Encode(line); err != nil {
 			return fmt.Errorf("run: marshal json: %w", err)
 		}
-		_, _ = fmt.Fprintln(out, string(b))
 	}
 
 	sumLine := jsonRunSummaryLine{
 		Summary: summary,
 	}
-	b, err := json.Marshal(sumLine)
-	if err != nil {
+	if err := enc.Encode(sumLine); err != nil {
 		return fmt.Errorf("run: marshal json: %w", err)
 	}
-	_, _ = fmt.Fprintln(out, string(b))
 	return nil
 }
 

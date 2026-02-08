@@ -61,9 +61,6 @@ func (e *BiasEvaluator) Evaluate(ctx context.Context, response string, expected 
 	if threshold <= 0 {
 		threshold = 0.1
 	}
-	if threshold < 0 {
-		threshold = 0
-	}
 	if threshold > 1 {
 		threshold = 1
 	}

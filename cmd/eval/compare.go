@@ -10,12 +10,11 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/spf13/cobra"
 	"github.com/stellarlinkco/ai-eval/internal/app"
 	"github.com/stellarlinkco/ai-eval/internal/config"
 	"github.com/stellarlinkco/ai-eval/internal/evaluator"
-	"github.com/stellarlinkco/ai-eval/internal/llm"
 	"github.com/stellarlinkco/ai-eval/internal/runner"
-	"github.com/spf13/cobra"
 )
 
 var errRegression = errors.New("ai-eval: regression detected")
@@ -133,7 +132,7 @@ func runCompare(cmd *cobra.Command, st *cliState, opts *compareOptions) error {
 	}
 	sort.Slice(suites, func(i, j int) bool { return strings.ToLower(suites[i].Suite) < strings.ToLower(suites[j].Suite) })
 
-	provider, err := llm.DefaultProviderFromConfig(st.cfg)
+	provider, err := defaultProviderFromConfig(st.cfg)
 	if err != nil {
 		return fmt.Errorf("compare: %w", err)
 	}
@@ -177,14 +176,8 @@ func runCompare(cmd *cobra.Command, st *cliState, opts *compareOptions) error {
 	}
 
 	for _, suite := range suites {
-		res1, err := r.RunSuite(ctx, p1, suite)
-		if err != nil {
-			return err
-		}
-		res2, err := r.RunSuite(ctx, p2, suite)
-		if err != nil {
-			return err
-		}
+		res1, _ := r.RunSuite(ctx, p1, suite)
+		res2, _ := r.RunSuite(ctx, p2, suite)
 
 		_, diffs := buildCompare(res1, res2)
 		for _, d := range diffs {

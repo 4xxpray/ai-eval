@@ -125,6 +125,87 @@ func TestLoadFromDir_BadYAML(t *testing.T) {
 	}
 }
 
+func TestLoadFromFile_BadYAML(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bad.yaml")
+	if err := os.WriteFile(path, []byte(":\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	_, err := LoadFromFile(path)
+	if err == nil {
+		t.Fatalf("LoadFromFile: expected error")
+	}
+}
+
+func TestLoadFromFile_JSON(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "suite.yaml")
+
+	const in = `{
+  "suite": "s",
+  "prompt": "p",
+  "cases": [
+    {
+      "id": "c1",
+      "input": {},
+      "expected": { "exact_match": "ok" }
+    }
+  ]
+}`
+	if err := os.WriteFile(path, []byte(in), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	s, err := LoadFromFile(path)
+	if err != nil {
+		t.Fatalf("LoadFromFile: %v", err)
+	}
+	if s.Suite != "s" {
+		t.Fatalf("Suite: got %q want %q", s.Suite, "s")
+	}
+}
+
+func TestLoadFromFile_InvalidSuite(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "suite.yaml")
+
+	const in = `
+suite: s
+prompt: p
+cases:
+  - id: c1
+    input: {}
+    expected: {}
+`
+	if err := os.WriteFile(path, []byte(in), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	_, err := LoadFromFile(path)
+	if err == nil {
+		t.Fatalf("LoadFromFile: expected error")
+	}
+	if !strings.Contains(err.Error(), "validate") {
+		t.Fatalf("LoadFromFile: got %v", err)
+	}
+}
+
+func TestLoadFromDir_Missing(t *testing.T) {
+	t.Parallel()
+
+	_, err := LoadFromDir(filepath.Join(t.TempDir(), "missing"))
+	if err == nil {
+		t.Fatalf("LoadFromDir: expected error")
+	}
+}
+
 func TestValidate(t *testing.T) {
 	t.Parallel()
 
@@ -149,14 +230,74 @@ func TestValidate(t *testing.T) {
 			wantError: "duplicate id",
 		},
 		{
+			name:      "missing prompt reference",
+			suite:     &TestSuite{Suite: "s", Cases: []TestCase{{ID: "c1", Input: map[string]any{}, Expected: Expected{ExactMatch: "ok"}}}},
+			wantError: "missing prompt reference",
+		},
+		{
+			name:      "no cases",
+			suite:     &TestSuite{Suite: "s", Prompt: "p"},
+			wantError: "no cases",
+		},
+		{
+			name:      "missing case id",
+			suite:     &TestSuite{Suite: "s", Prompt: "p", Cases: []TestCase{{ID: "", Input: map[string]any{}, Expected: Expected{ExactMatch: "ok"}}}},
+			wantError: "missing id",
+		},
+		{
+			name:      "missing input",
+			suite:     &TestSuite{Suite: "s", Prompt: "p", Cases: []TestCase{{ID: "c1", Input: nil, Expected: Expected{ExactMatch: "ok"}}}},
+			wantError: "missing input",
+		},
+		{
+			name:      "negative trials",
+			suite:     &TestSuite{Suite: "s", Prompt: "p", Cases: []TestCase{{ID: "c1", Input: map[string]any{}, Expected: Expected{ExactMatch: "ok"}, Trials: -1}}},
+			wantError: "trials must be >= 0",
+		},
+		{
+			name:      "negative max steps",
+			suite:     &TestSuite{Suite: "s", Prompt: "p", Cases: []TestCase{{ID: "c1", Input: map[string]any{}, Expected: Expected{ExactMatch: "ok"}, MaxSteps: -1}}},
+			wantError: "max_steps must be >= 0",
+		},
+		{
+			name:      "tool mock missing name",
+			suite:     &TestSuite{Suite: "s", Prompt: "p", Cases: []TestCase{{ID: "c1", Input: map[string]any{}, Expected: Expected{ExactMatch: "ok"}, ToolMocks: []ToolMock{{Name: " ", Response: "ok"}}}}},
+			wantError: "tool_mocks[0]: missing name",
+		},
+		{
 			name:      "no assertions",
 			suite:     &TestSuite{Suite: "s", Prompt: "p", Cases: []TestCase{{ID: "c1", Input: map[string]any{}, Expected: Expected{}}}},
 			wantError: "no expected assertions",
 		},
 		{
+			name:      "expected contains empty",
+			suite:     &TestSuite{Suite: "s", Prompt: "p", Cases: []TestCase{{ID: "c1", Input: map[string]any{}, Expected: Expected{Contains: []string{" "}}}}},
+			wantError: "expected.contains[0]: empty string",
+		},
+		{
+			name:      "expected not_contains empty",
+			suite:     &TestSuite{Suite: "s", Prompt: "p", Cases: []TestCase{{ID: "c1", Input: map[string]any{}, Expected: Expected{NotContains: []string{" "}}}}},
+			wantError: "expected.not_contains[0]: empty string",
+		},
+		{
 			name:      "bad regex",
 			suite:     &TestSuite{Suite: "s", Prompt: "p", Cases: []TestCase{{ID: "c1", Input: map[string]any{}, Expected: Expected{Regex: []string{"["}}}}},
 			wantError: "expected.regex",
+		},
+		{
+			name:      "expected tool call missing name",
+			suite:     &TestSuite{Suite: "s", Prompt: "p", Cases: []TestCase{{ID: "c1", Input: map[string]any{}, Expected: Expected{ToolCalls: []ToolCallExpect{{Name: " "}}}}}},
+			wantError: "expected.tool_calls[0]: missing name",
+		},
+		{
+			name:      "expected tool call negative order",
+			suite:     &TestSuite{Suite: "s", Prompt: "p", Cases: []TestCase{{ID: "c1", Input: map[string]any{}, Expected: Expected{ToolCalls: []ToolCallExpect{{Name: "t1", Order: -1}}}}}},
+			wantError: "order must be >= 0",
+		},
+		{
+			name:      "expected tool call duplicate order",
+			suite:     &TestSuite{Suite: "s", Prompt: "p", Cases: []TestCase{{ID: "c1", Input: map[string]any{}, Expected: Expected{ToolCalls: []ToolCallExpect{{Name: "t1", Order: 1}, {Name: "t2", Order: 1}}}}}},
+			wantError: "duplicate order 1",
 		},
 		{
 			name:      "unknown evaluator",
@@ -200,11 +341,67 @@ func TestValidate_NewEvaluatorTypes(t *testing.T) {
 				{Type: "hallucination", GroundTruth: "gt", ScoreThreshold: 0.9},
 				{Type: "toxicity", ScoreThreshold: 0.1},
 				{Type: "bias", Categories: []string{"gender"}, ScoreThreshold: 0.1},
+				{Type: "tool_call"},
+				{Type: "json_schema"},
+				{Type: "contains"},
+				{Type: "regex"},
+				{Type: "exact"},
 			},
 		}},
 	}
 
 	if err := Validate(suite); err != nil {
 		t.Fatalf("Validate: %v", err)
+	}
+}
+
+func TestValidate_EvaluatorErrors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		e         EvaluatorConfig
+		wantError string
+	}{
+		{name: "missing type", e: EvaluatorConfig{Type: "  "}, wantError: "missing type"},
+		{name: "negative score threshold", e: EvaluatorConfig{Type: "regex", ScoreThreshold: -0.1}, wantError: "score_threshold must be >= 0"},
+		{name: "llm_judge missing criteria", e: EvaluatorConfig{Type: "llm_judge"}, wantError: "missing criteria"},
+		{name: "llm_judge negative score scale", e: EvaluatorConfig{Type: "llm_judge", Criteria: "c", ScoreScale: -1}, wantError: "score_scale must be >= 0"},
+		{name: "similarity missing reference", e: EvaluatorConfig{Type: "similarity"}, wantError: "missing reference"},
+		{name: "factuality missing ground_truth", e: EvaluatorConfig{Type: "factuality"}, wantError: "missing ground_truth"},
+		{name: "faithfulness missing context", e: EvaluatorConfig{Type: "faithfulness"}, wantError: "missing context"},
+		{name: "relevancy missing question", e: EvaluatorConfig{Type: "relevancy"}, wantError: "missing question"},
+		{name: "precision missing context", e: EvaluatorConfig{Type: "precision", Question: "q"}, wantError: "missing context"},
+		{name: "precision missing question", e: EvaluatorConfig{Type: "precision", Context: "c"}, wantError: "missing question"},
+		{name: "task_completion missing task", e: EvaluatorConfig{Type: "task_completion"}, wantError: "missing task"},
+		{name: "efficiency negative max_steps", e: EvaluatorConfig{Type: "efficiency", MaxSteps: -1}, wantError: "max_steps must be >= 0"},
+		{name: "efficiency negative max_tokens", e: EvaluatorConfig{Type: "efficiency", MaxTokens: -1}, wantError: "max_tokens must be >= 0"},
+		{name: "hallucination missing ground_truth", e: EvaluatorConfig{Type: "hallucination"}, wantError: "missing ground_truth"},
+		{name: "bias empty category", e: EvaluatorConfig{Type: "bias", Categories: []string{" "}}, wantError: "categories[0]: empty string"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			suite := &TestSuite{
+				Suite:  "s",
+				Prompt: "p",
+				Cases: []TestCase{{
+					ID:         "c1",
+					Input:      map[string]any{},
+					Expected:   Expected{},
+					Evaluators: []EvaluatorConfig{tt.e},
+				}},
+			}
+
+			err := Validate(suite)
+			if err == nil {
+				t.Fatalf("Validate: expected error")
+			}
+			if !strings.Contains(err.Error(), tt.wantError) {
+				t.Fatalf("Validate: got %v want substring %q", err, tt.wantError)
+			}
+		})
 	}
 }

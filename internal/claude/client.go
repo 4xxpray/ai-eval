@@ -204,11 +204,12 @@ func (c *Client) CompleteWithTools(ctx context.Context, req *Request) (*EvalResu
 		LatencyMs: latency,
 		Error:     err,
 	}
+	if err != nil {
+		return out, err
+	}
 	if resp == nil {
-		if err != nil {
-			return out, err
-		}
-		return out, errors.New("claude: nil response")
+		out.Error = errors.New("claude: nil response")
+		return out, out.Error
 	}
 
 	out.InputTokens = resp.Usage.InputTokens
@@ -228,10 +229,6 @@ func (c *Client) CompleteWithTools(ctx context.Context, req *Request) (*EvalResu
 		}
 	}
 	out.TextContent = sb.String()
-
-	if err != nil {
-		return out, err
-	}
 	return out, nil
 }
 

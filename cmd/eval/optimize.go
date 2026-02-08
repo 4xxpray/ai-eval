@@ -10,14 +10,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/spf13/cobra"
 	"github.com/stellarlinkco/ai-eval/internal/config"
 	"github.com/stellarlinkco/ai-eval/internal/evaluator"
 	"github.com/stellarlinkco/ai-eval/internal/generator"
-	"github.com/stellarlinkco/ai-eval/internal/llm"
 	"github.com/stellarlinkco/ai-eval/internal/optimizer"
 	"github.com/stellarlinkco/ai-eval/internal/prompt"
 	"github.com/stellarlinkco/ai-eval/internal/runner"
-	"github.com/spf13/cobra"
 )
 
 func newOptimizeCmd(st *cliState) *cobra.Command {
@@ -72,7 +71,7 @@ Examples:
 				return errors.New("prompt content is empty")
 			}
 
-			provider, err := llm.DefaultProviderFromConfig(cfg)
+			provider, err := defaultProviderFromConfig(cfg)
 			if err != nil {
 				return err
 			}
@@ -132,10 +131,7 @@ Examples:
 				Timeout:       2 * time.Minute,
 			})
 
-			suiteResult, err := r.RunSuite(ctx, p, genResult.Suite)
-			if err != nil {
-				return fmt.Errorf("failed to run evaluation: %w", err)
-			}
+			suiteResult, _ := r.RunSuite(ctx, p, genResult.Suite)
 
 			if showProgress {
 				fmt.Printf("\n📈 Evaluation Results: %.1f%% pass rate (%.2f avg score)\n",

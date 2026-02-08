@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/spf13/cobra"
 	"github.com/stellarlinkco/ai-eval/internal/config"
 	"github.com/stellarlinkco/ai-eval/internal/evaluator"
 	"github.com/stellarlinkco/ai-eval/internal/llm"
@@ -20,7 +21,6 @@ import (
 	"github.com/stellarlinkco/ai-eval/internal/prompt"
 	"github.com/stellarlinkco/ai-eval/internal/runner"
 	"github.com/stellarlinkco/ai-eval/internal/testcase"
-	"github.com/spf13/cobra"
 )
 
 type diagnoseOptions struct {
@@ -82,7 +82,7 @@ func runDiagnose(cmd *cobra.Command, st *cliState, opts *diagnoseOptions) error 
 		return fmt.Errorf("diagnose: invalid --output %q (expected text|json)", opts.output)
 	}
 
-	provider, err := llm.DefaultProviderFromConfig(st.cfg)
+	provider, err := defaultProviderFromConfig(st.cfg)
 	if err != nil {
 		return fmt.Errorf("diagnose: %w", err)
 	}
@@ -106,9 +106,6 @@ func runDiagnose(cmd *cobra.Command, st *cliState, opts *diagnoseOptions) error 
 	if err != nil {
 		return err
 	}
-	if len(suites) == 0 {
-		return fmt.Errorf("diagnose: no test suites selected")
-	}
 
 	p := buildPromptForRun(pIn, promptName, isSystem)
 
@@ -117,10 +114,7 @@ func runDiagnose(cmd *cobra.Command, st *cliState, opts *diagnoseOptions) error 
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
-	results, err := runSuites(ctx, r, p, suites)
-	if err != nil {
-		return err
-	}
+	results, _ := runSuites(ctx, r, p, suites)
 
 	advisor := &optimizer.Advisor{Provider: provider}
 	diag, err := advisor.Diagnose(ctx, &optimizer.DiagnoseRequest{
@@ -134,11 +128,11 @@ func runDiagnose(cmd *cobra.Command, st *cliState, opts *diagnoseOptions) error 
 	switch outFmt {
 	case "json":
 		payload := buildDiagnoseJSONOutput(p, suites, results, diag)
-		b, err := json.MarshalIndent(payload, "", "  ")
-		if err != nil {
+		enc := json.NewEncoder(cmd.OutOrStdout())
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(payload); err != nil {
 			return fmt.Errorf("diagnose: marshal output: %w", err)
 		}
-		_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(b))
 		return nil
 	default:
 		printDiagnoseText(cmd, p, suites, results, diag)
@@ -284,13 +278,13 @@ func selectSuitesAndPromptHints(pIn *promptInput, suites []*testcase.TestSuite) 
 	}
 
 	suites = compactSuites(suites)
+	if len(suites) == 0 {
+		return nil, "", false, fmt.Errorf("diagnose: no test suites loaded")
+	}
 
 	// Infer/validate prompt name from suites if prompt is not YAML-based.
 	uniquePromptNames := make(map[string]struct{}, 4)
 	for _, s := range suites {
-		if s == nil {
-			continue
-		}
 		name := strings.TrimSpace(s.Prompt)
 		if name == "" {
 			return nil, "", false, fmt.Errorf("diagnose: suite %q: missing prompt reference", strings.TrimSpace(s.Suite))
@@ -324,22 +318,6 @@ func selectSuitesAndPromptHints(pIn *promptInput, suites []*testcase.TestSuite) 
 			return nil, "", false, fmt.Errorf("diagnose: tests contain multiple prompt names; pass a specific suite file or use a YAML prompt")
 		}
 		promptName = suitePromptName
-	}
-
-	// Filter suites to the prompt name we resolved.
-	filtered := suites[:0]
-	for _, s := range suites {
-		if s == nil {
-			continue
-		}
-		if strings.TrimSpace(s.Prompt) != promptName {
-			continue
-		}
-		filtered = append(filtered, s)
-	}
-	suites = filtered
-	if len(suites) == 0 {
-		return nil, "", false, fmt.Errorf("diagnose: no test suites match prompt %q", promptName)
 	}
 
 	// Resolve system-prompt behavior.

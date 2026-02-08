@@ -82,3 +82,114 @@ func TestRender_NilPrompt(t *testing.T) {
 		t.Fatalf("Render: expected error")
 	}
 }
+
+func TestRender_MustacheReplacement(t *testing.T) {
+	t.Parallel()
+
+	p := &Prompt{
+		Name:     "t",
+		Template: "Hello {{NAME}}",
+		Variables: []Variable{
+			{Name: "NAME", Required: true},
+		},
+	}
+
+	out, err := Render(p, map[string]any{"NAME": "Alice"})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if out != "Hello Alice" {
+		t.Fatalf("out: got %q want %q", out, "Hello Alice")
+	}
+}
+
+func TestRender_LeavesUnknownMustachePlaceholder(t *testing.T) {
+	t.Parallel()
+
+	p := &Prompt{
+		Name:     "t",
+		Template: "Hello {{MISSING}}",
+	}
+
+	out, err := Render(p, nil)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if out != "Hello {{MISSING}}" {
+		t.Fatalf("out: got %q want %q", out, "Hello {{MISSING}}")
+	}
+}
+
+func TestRender_UnmatchedCloseDelimiter(t *testing.T) {
+	t.Parallel()
+
+	p := &Prompt{
+		Name:     "t",
+		Template: "oops }}",
+	}
+
+	_, err := Render(p, nil)
+	if err == nil {
+		t.Fatalf("Render: expected error")
+	}
+	if !strings.Contains(err.Error(), "unmatched") {
+		t.Fatalf("Render: got %v", err)
+	}
+}
+
+func TestRender_GoTemplateParseError(t *testing.T) {
+	t.Parallel()
+
+	p := &Prompt{
+		Name:     "t",
+		Template: "{{.name",
+	}
+
+	_, err := Render(p, map[string]any{"name": "x"})
+	if err == nil {
+		t.Fatalf("Render: expected error")
+	}
+	if !strings.Contains(err.Error(), "parse template") {
+		t.Fatalf("Render: got %v", err)
+	}
+}
+
+func TestRender_EmptyVariableNameIgnored(t *testing.T) {
+	t.Parallel()
+
+	p := &Prompt{
+		Name:     "t",
+		Template: "ok",
+		Variables: []Variable{
+			{Name: "", Required: true},
+		},
+	}
+
+	out, err := Render(p, nil)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if out != "ok" {
+		t.Fatalf("out: got %q want %q", out, "ok")
+	}
+}
+
+func TestRender_DefaultNotOverrideExisting(t *testing.T) {
+	t.Parallel()
+
+	p := &Prompt{
+		Name:     "t",
+		Template: "Lang {{.lang}}",
+		Variables: []Variable{
+			{Name: "lang", Required: false, Default: "go"},
+		},
+	}
+
+	out, err := Render(p, map[string]any{"lang": "python"})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if out != "Lang python" {
+		t.Fatalf("out: got %q want %q", out, "Lang python")
+	}
+}

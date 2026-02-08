@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -172,7 +173,7 @@ func SaveRun(ctx context.Context, writer store.RunWriter, runs []SuiteRun, summa
 
 func newRunID() (string, error) {
 	var buf [8]byte
-	if _, err := rand.Read(buf[:]); err != nil {
+	if _, err := io.ReadFull(rand.Reader, buf[:]); err != nil {
 		return "", err
 	}
 	return fmt.Sprintf("run_%s_%x", time.Now().UTC().Format("20060102T150405Z"), buf), nil

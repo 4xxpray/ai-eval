@@ -69,9 +69,6 @@ func (e *TaskCompletionEvaluator) Evaluate(ctx context.Context, response string,
 	if threshold <= 0 {
 		threshold = 0.6
 	}
-	if threshold < 0 {
-		threshold = 0
-	}
 	if threshold > 1 {
 		threshold = 1
 	}

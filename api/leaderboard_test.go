@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -137,5 +138,149 @@ func TestLeaderboardHandlers_GetModelHistory(t *testing.T) {
 	}
 	if out[0].Score != 0.90 {
 		t.Fatalf("history[0].Score: got %.2f want %.2f", out[0].Score, 0.90)
+	}
+}
+
+func TestLeaderboardHandlers_NilStore(t *testing.T) {
+	r := newTestRouterWithLeaderboard(t, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/leaderboard?dataset=mmlu", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status: got %d want %d", rec.Code, http.StatusInternalServerError)
+	}
+}
+
+func TestLeaderboardHandlers_GetLeaderboard_InvalidLimit(t *testing.T) {
+	lb, err := leaderboard.NewStore(":memory:")
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer lb.Close()
+
+	r := newTestRouterWithLeaderboard(t, lb)
+	req := httptest.NewRequest(http.MethodGet, "/api/leaderboard?dataset=mmlu&limit=wat", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status: got %d want %d", rec.Code, http.StatusBadRequest)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/leaderboard?dataset=mmlu&limit=-1", nil)
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status: got %d want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
+func TestLeaderboardHandlers_GetLeaderboard_ClampsLimitTo100(t *testing.T) {
+	lb, err := leaderboard.NewStore(":memory:")
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer lb.Close()
+
+	ctx := context.Background()
+	for i := 0; i < 101; i++ {
+		if err := lb.Save(ctx, &leaderboard.Entry{
+			Model:    fmt.Sprintf("m%d", i),
+			Provider: "openai",
+			Dataset:  "mmlu",
+			Score:    0.80,
+			Accuracy: 0.80,
+			Latency:  100,
+			Cost:     0,
+			EvalDate: time.UnixMilli(int64(1000 + i)).UTC(),
+		}); err != nil {
+			t.Fatalf("Save: %v", err)
+		}
+	}
+
+	r := newTestRouterWithLeaderboard(t, lb)
+	req := httptest.NewRequest(http.MethodGet, "/api/leaderboard?dataset=mmlu&limit=200", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: got %d want %d", rec.Code, http.StatusOK)
+	}
+
+	var out []leaderboard.Entry
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	if len(out) != 100 {
+		t.Fatalf("len(entries): got %d want %d", len(out), 100)
+	}
+}
+
+func TestLeaderboardHandlers_StoreError(t *testing.T) {
+	lb, err := leaderboard.NewStore(":memory:")
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	if err := lb.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	r := newTestRouterWithLeaderboard(t, lb)
+	req := httptest.NewRequest(http.MethodGet, "/api/leaderboard?dataset=mmlu", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status: got %d want %d", rec.Code, http.StatusInternalServerError)
+	}
+}
+
+func TestLeaderboardHandlers_GetModelHistory_MissingParams(t *testing.T) {
+	lb, err := leaderboard.NewStore(":memory:")
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer lb.Close()
+
+	r := newTestRouterWithLeaderboard(t, lb)
+	req := httptest.NewRequest(http.MethodGet, "/api/leaderboard/history?model=&dataset=gsm8k", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status: got %d want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
+func TestLeaderboardHandlers_GetModelHistory_NilStore(t *testing.T) {
+	r := newTestRouterWithLeaderboard(t, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/leaderboard/history?model=m1&dataset=gsm8k", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status: got %d want %d", rec.Code, http.StatusInternalServerError)
+	}
+}
+
+func TestLeaderboardHandlers_GetModelHistory_StoreError(t *testing.T) {
+	lb, err := leaderboard.NewStore(":memory:")
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	if err := lb.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	r := newTestRouterWithLeaderboard(t, lb)
+	req := httptest.NewRequest(http.MethodGet, "/api/leaderboard/history?model=m1&dataset=gsm8k", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status: got %d want %d", rec.Code, http.StatusInternalServerError)
 	}
 }

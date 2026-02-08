@@ -61,9 +61,6 @@ func (e *FaithfulnessEvaluator) Evaluate(ctx context.Context, response string, e
 	if threshold <= 0 {
 		threshold = 0.8
 	}
-	if threshold < 0 {
-		threshold = 0
-	}
 	if threshold > 1 {
 		threshold = 1
 	}

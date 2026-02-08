@@ -137,3 +137,15 @@ func TestCorsMiddleware_WildcardAllowsAll(t *testing.T) {
 		t.Fatalf("Access-Control-Allow-Origin: got %q want %q", got, "*")
 	}
 }
+
+func TestRegisterRoutes_NilSafe(t *testing.T) {
+	var nilServer *Server
+	if err := nilServer.registerRoutes(); err != nil {
+		t.Fatalf("registerRoutes on nil: %v", err)
+	}
+
+	s := &Server{}
+	if err := s.registerRoutes(); err != nil {
+		t.Fatalf("registerRoutes with nil router: %v", err)
+	}
+}

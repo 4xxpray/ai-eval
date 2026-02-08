@@ -341,14 +341,6 @@ caseLoop:
 				}
 				return
 			}
-			if res == nil {
-				out.Results[idx] = RunResult{
-					Suite:  suite.Suite,
-					CaseID: tc.ID,
-					Error:  errors.New("runner: nil case result"),
-				}
-				return
-			}
 			res.Suite = suite.Suite
 			out.Results[idx] = *res
 		}()

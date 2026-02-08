@@ -28,9 +28,10 @@ const (
 var (
 	errHumanEvalCodeExecDisabled = fmt.Errorf("humaneval: code execution disabled (set %s=1)", codeExecEnv)
 
-	humanEvalDockerReadyOnce sync.Once
-	humanEvalDockerBin       string
-	humanEvalDockerReadyErr  error
+	humanEvalDockerReadyOnce    sync.Once
+	humanEvalDockerBin          string
+	humanEvalDockerReadyErr     error
+	humanEvalDockerReadyTimeout = 5 * time.Second
 
 	humanEvalHostWarnOnce sync.Once
 )
@@ -326,7 +327,7 @@ func humanEvalDockerReady() (string, error) {
 			return
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), humanEvalDockerReadyTimeout)
 		defer cancel()
 
 		version := exec.CommandContext(ctx, docker, "version", "--format", "{{.Server.Version}}")
@@ -340,7 +341,7 @@ func humanEvalDockerReady() (string, error) {
 			return
 		}
 
-		ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel = context.WithTimeout(context.Background(), humanEvalDockerReadyTimeout)
 		defer cancel()
 
 		inspect := exec.CommandContext(ctx, docker, "image", "inspect", "-f", "{{.Id}}", humanEvalDockerImage)

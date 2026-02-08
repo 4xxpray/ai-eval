@@ -17,6 +17,11 @@ func (s *Server) registerStatic() {
 	}
 
 	handler := func(c *gin.Context) {
+		if c.Request.Method != http.MethodGet && c.Request.Method != http.MethodHead {
+			c.Status(http.StatusNotFound)
+			return
+		}
+
 		path := c.Request.URL.Path
 		rootAbs, err := filepath.Abs(staticRoot)
 		if err != nil {
@@ -53,6 +58,5 @@ func (s *Server) registerStatic() {
 		c.File(indexPath)
 	}
 
-	s.router.GET("/*filepath", handler)
-	s.router.HEAD("/*filepath", handler)
+	s.router.NoRoute(handler)
 }

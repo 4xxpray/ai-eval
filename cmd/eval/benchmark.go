@@ -65,7 +65,7 @@ func runBenchmark(cmd *cobra.Command, st *cliState, opts *benchmarkOptions) erro
 		return err
 	}
 
-	provider, modelName, err := resolveBenchmarkProvider(st.cfg, opts.provider, opts.model)
+	provider, modelName, err := benchmarkProviderFromConfig(st.cfg, opts.provider, opts.model)
 	if err != nil {
 		return err
 	}
@@ -76,7 +76,11 @@ func runBenchmark(cmd *cobra.Command, st *cliState, opts *benchmarkOptions) erro
 	}
 	defer lb.Close()
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	parent := cmd.Context()
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, stop := signal.NotifyContext(parent, os.Interrupt)
 	defer stop()
 
 	r := &benchmark.BenchmarkRunner{

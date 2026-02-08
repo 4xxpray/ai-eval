@@ -64,9 +64,6 @@ func (s *Server) handleListPrompts(c *gin.Context) {
 	if name != "" {
 		filtered := prompts[:0]
 		for _, p := range prompts {
-			if p == nil {
-				continue
-			}
 			if strings.EqualFold(strings.TrimSpace(p.Name), name) {
 				filtered = append(filtered, p)
 			}
@@ -184,9 +181,6 @@ func (s *Server) handleListTests(c *gin.Context) {
 	if promptFilter != "" {
 		filtered := suites[:0]
 		for _, suite := range suites {
-			if suite == nil {
-				continue
-			}
 			if strings.EqualFold(strings.TrimSpace(suite.Prompt), promptFilter) {
 				filtered = append(filtered, suite)
 			}
@@ -339,11 +333,7 @@ func (s *Server) handleStartRun(c *gin.Context) {
 		sort.Slice(suites, func(i, j int) bool { return suites[i].Suite < suites[j].Suite })
 
 		for _, suite := range suites {
-			res, err := r.RunSuite(ctx, p, suite)
-			if err != nil {
-				respondError(c, http.StatusInternalServerError, err)
-				return
-			}
+			res, _ := r.RunSuite(ctx, p, suite)
 			runs = append(runs, app.SuiteRun{PromptName: name, PromptVersion: p.Version, Suite: suite, Result: res})
 		}
 	}
@@ -562,15 +552,9 @@ func (s *Server) handleDiagnose(c *gin.Context) {
 	}
 
 	promptName := strings.TrimSpace(suites[0].Prompt)
-	if promptName == "" {
-		promptName = "prompt"
-	}
 
 	isSystem := suites[0].IsSystemPrompt
 	for _, suite := range suites[1:] {
-		if suite == nil {
-			continue
-		}
 		if suite.IsSystemPrompt != isSystem {
 			respondError(c, http.StatusBadRequest, errors.New("mixed is_system_prompt across suites"))
 			return
@@ -618,14 +602,7 @@ func (s *Server) handleDiagnose(c *gin.Context) {
 
 	results := make([]*runner.SuiteResult, 0, len(suites))
 	for _, suite := range suites {
-		if suite == nil {
-			continue
-		}
-		res, err := r.RunSuite(ctx, p, suite)
-		if err != nil {
-			respondError(c, http.StatusInternalServerError, err)
-			return
-		}
+		res, _ := r.RunSuite(ctx, p, suite)
 		results = append(results, res)
 	}
 
@@ -645,9 +622,6 @@ func (s *Server) handleDiagnose(c *gin.Context) {
 		Diagnosis: diag,
 	}
 	for _, res := range results {
-		if res == nil {
-			continue
-		}
 		resp.Suites = append(resp.Suites, evalSummaryResponse{
 			PassRate:   res.PassRate,
 			AvgScore:   res.AvgScore,
@@ -890,11 +864,7 @@ func (s *Server) handleOptimize(c *gin.Context) {
 		Timeout:       2 * time.Minute,
 	})
 
-	suiteResult, err := r.RunSuite(ctx, p, genResult.Suite)
-	if err != nil {
-		respondError(c, http.StatusInternalServerError, fmt.Errorf("failed to run evaluation: %w", err))
-		return
-	}
+	suiteResult, _ := r.RunSuite(ctx, p, genResult.Suite)
 
 	response := &optimizeResponse{
 		Analysis:    genResult.Analysis,

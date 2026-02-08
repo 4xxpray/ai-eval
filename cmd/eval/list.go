@@ -6,8 +6,8 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/stellarlinkco/ai-eval/internal/app"
 	"github.com/spf13/cobra"
+	"github.com/stellarlinkco/ai-eval/internal/app"
 )
 
 func newListCmd() *cobra.Command {
@@ -39,9 +39,6 @@ func newListPromptsCmd() *cobra.Command {
 			tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
 			fmt.Fprintln(tw, "NAME\tVERSION\tDESCRIPTION")
 			for _, p := range prompts {
-				if p == nil {
-					continue
-				}
 				fmt.Fprintf(tw, "%s\t%s\t%s\n", p.Name, p.Version, p.Description)
 			}
 			return tw.Flush()
@@ -66,9 +63,6 @@ func newListTestsCmd() *cobra.Command {
 			tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
 			fmt.Fprintln(tw, "SUITE\tPROMPT\tCASES\tDESCRIPTION")
 			for _, s := range suites {
-				if s == nil {
-					continue
-				}
 				fmt.Fprintf(tw, "%s\t%s\t%d\t%s\n", s.Suite, s.Prompt, len(s.Cases), s.Description)
 			}
 			return tw.Flush()

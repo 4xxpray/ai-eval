@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/spf13/cobra"
 	"github.com/stellarlinkco/ai-eval/internal/app"
 	"github.com/stellarlinkco/ai-eval/internal/config"
 	"github.com/stellarlinkco/ai-eval/internal/evaluator"
@@ -17,7 +18,6 @@ import (
 	"github.com/stellarlinkco/ai-eval/internal/redteam"
 	"github.com/stellarlinkco/ai-eval/internal/runner"
 	"github.com/stellarlinkco/ai-eval/internal/testcase"
-	"github.com/spf13/cobra"
 )
 
 type redteamOptions struct {
@@ -85,15 +85,12 @@ func runRedteam(cmd *cobra.Command, st *cliState, opts *redteamOptions) error {
 		perCategory    = 4
 	)
 
-	provider, err := llm.DefaultProviderFromConfig(st.cfg)
+	provider, err := defaultProviderFromConfig(st.cfg)
 	if err != nil {
 		return fmt.Errorf("redteam: %w", err)
 	}
 
-	categories, err := parseRedteamCategories(opts.categories)
-	if err != nil {
-		return err
-	}
+	categories := parseRedteamCategories(opts.categories)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
@@ -145,14 +142,6 @@ func runRedteam(cmd *cobra.Command, st *cliState, opts *redteamOptions) error {
 		}
 
 		switch output {
-		case FormatTable:
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Summary: prompts=%d cases=%d passed=%d failed=%d latency_ms=%d tokens=%d\n",
-				summary.totalPrompts, summary.totalCases, summary.passedCases, summary.failedCases, summary.totalLatency, summary.totalTokens)
-			if anyFailed {
-				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Overall: %s\n", coloredStatus(false))
-			} else {
-				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Overall: %s\n", coloredStatus(true))
-			}
 		case FormatJSON:
 			if err := printRedteamSummaryJSON(cmd, summary, !anyFailed); err != nil {
 				return err
@@ -165,18 +154,12 @@ func runRedteam(cmd *cobra.Command, st *cliState, opts *redteamOptions) error {
 			} else {
 				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Overall: PASS")
 			}
-		default:
-			return fmt.Errorf("redteam: internal error: unknown output format %q", output)
 		}
 
 		if anyFailed {
 			return errTestsFailed
 		}
 		return nil
-	}
-
-	if len(results) == 0 || results[0] == nil {
-		return fmt.Errorf("redteam: nil suite result")
 	}
 
 	res := results[0]
@@ -245,18 +228,16 @@ func printRedteamSummaryJSON(cmd *cobra.Command, summary redteamSummary, passed 
 		},
 		Passed: passed,
 	}
-	b, err := json.Marshal(line)
-	if err != nil {
+	if err := json.NewEncoder(cmd.OutOrStdout()).Encode(line); err != nil {
 		return fmt.Errorf("redteam: marshal json: %w", err)
 	}
-	_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(b))
 	return nil
 }
 
-func parseRedteamCategories(s string) ([]redteam.Category, error) {
+func parseRedteamCategories(s string) []redteam.Category {
 	s = strings.TrimSpace(s)
 	if s == "" {
-		return nil, nil
+		return nil
 	}
 	if strings.EqualFold(s, "all") {
 		return []redteam.Category{
@@ -264,7 +245,7 @@ func parseRedteamCategories(s string) ([]redteam.Category, error) {
 			redteam.CategoryInjection,
 			redteam.CategoryPII,
 			redteam.CategoryHarmful,
-		}, nil
+		}
 	}
 	parts := strings.Split(s, ",")
 	out := make([]redteam.Category, 0, len(parts))
@@ -275,7 +256,7 @@ func parseRedteamCategories(s string) ([]redteam.Category, error) {
 		}
 		out = append(out, redteam.Category(p))
 	}
-	return out, nil
+	return out
 }
 
 func limitRedteamAttacks(in []testcase.TestCase, categories []redteam.Category, perCategory int) []testcase.TestCase {
@@ -343,6 +324,14 @@ func redteamPlaceholderValue(varName string) string {
 	}
 }
 
+func markRedteamFailure(rr *runner.RunResult, err error) {
+	rr.Error = err
+	rr.Passed = false
+	rr.Score = 0
+	rr.PassAtK = 0
+	rr.PassExpK = 0
+}
+
 func runRedteamSuite(
 	ctx context.Context,
 	provider llm.Provider,
@@ -388,11 +377,7 @@ func runRedteamSuite(
 
 		responseText := llm.Text(resp)
 		if callErr != nil {
-			rr.Error = callErr
-			rr.Passed = false
-			rr.Score = 0
-			rr.PassAtK = 0
-			rr.PassExpK = 0
+			markRedteamFailure(&rr, callErr)
 		} else {
 			expected := map[string]any{
 				"criteria":        redteamJudgeCriteria(cat),
@@ -404,17 +389,7 @@ func runRedteamSuite(
 
 			judgeRes, judgeErr := judge.Evaluate(ctx, responseText, expected)
 			if judgeErr != nil {
-				rr.Error = judgeErr
-				rr.Passed = false
-				rr.Score = 0
-				rr.PassAtK = 0
-				rr.PassExpK = 0
-			} else if judgeRes == nil {
-				rr.Error = fmt.Errorf("redteam: nil judge result")
-				rr.Passed = false
-				rr.Score = 0
-				rr.PassAtK = 0
-				rr.PassExpK = 0
+				markRedteamFailure(&rr, judgeErr)
 			} else {
 				rr.Score = judgeRes.Score
 				rr.Passed = judgeRes.Passed

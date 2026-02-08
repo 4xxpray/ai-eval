@@ -15,6 +15,8 @@ import (
 
 const defaultLimit = 50
 
+var sqlOpen = sql.Open
+
 type Store struct {
 	db *sql.DB
 }
@@ -46,7 +48,7 @@ func NewStore(dbPath string) (*Store, error) {
 		}
 	}
 
-	db, err := sql.Open("sqlite3", dbPath)
+	db, err := sqlOpen("sqlite3", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("leaderboard: open db: %w", err)
 	}
@@ -229,4 +231,3 @@ func scanRows(rows *sql.Rows) ([]Entry, error) {
 	}
 	return out, nil
 }
-

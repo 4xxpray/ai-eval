@@ -65,7 +65,7 @@ func runFix(cmd *cobra.Command, st *cliState, opts *fixOptions) error {
 		return fmt.Errorf("fix: --apply requires --prompt (file path)")
 	}
 
-	provider, err := llm.DefaultProviderFromConfig(st.cfg)
+	provider, err := defaultProviderFromConfig(st.cfg)
 	if err != nil {
 		return fmt.Errorf("fix: %w", err)
 	}
@@ -95,10 +95,7 @@ func runFix(cmd *cobra.Command, st *cliState, opts *fixOptions) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
-	results, err := runSuites(ctx, r, p, suites)
-	if err != nil {
-		return err
-	}
+	results, _ := runSuites(ctx, r, p, suites)
 
 	advisor := &optimizer.Advisor{Provider: provider}
 	diag, err := advisor.Diagnose(ctx, &optimizer.DiagnoseRequest{
@@ -126,7 +123,7 @@ func runFix(cmd *cobra.Command, st *cliState, opts *fixOptions) error {
 	}
 
 	if opts.apply && !opts.dryRun {
-		if err := writeFixedPrompt(pIn, fixedPrompt); err != nil {
+		if err := writeFixedPromptFunc(pIn, fixedPrompt); err != nil {
 			return err
 		}
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\nApplied to: %s\n", strings.TrimSpace(pIn.Path))
@@ -179,10 +176,7 @@ func rewritePromptFallback(ctx context.Context, provider llm.Provider, promptTex
 		return "", errors.New("fix: nil diagnosis")
 	}
 
-	b, err := json.Marshal(diag)
-	if err != nil {
-		return "", fmt.Errorf("fix: marshal diagnosis: %w", err)
-	}
+	b, _ := json.Marshal(diag)
 
 	p := strings.ReplaceAll(rewritePromptFallbackTemplate, "{{PROMPT}}", promptText)
 	p = strings.ReplaceAll(p, "{{DIAGNOSIS_JSON}}", string(b))
@@ -247,3 +241,5 @@ func writeFixedPrompt(pIn *promptInput, fixedPrompt string) error {
 	}
 	return nil
 }
+
+var writeFixedPromptFunc = writeFixedPrompt

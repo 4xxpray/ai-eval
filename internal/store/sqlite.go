@@ -30,6 +30,11 @@ type SQLiteStore struct {
 	suitesByRunPromptVersionStmt *sql.Stmt
 }
 
+var (
+	sqliteOpen              = sql.Open
+	sqlitePrepareStatements = (*SQLiteStore).prepareStatements
+)
+
 // NewSQLiteStore opens or creates a SQLite store at the given path.
 func NewSQLiteStore(path string) (*SQLiteStore, error) {
 	path = strings.TrimSpace(path)
@@ -45,7 +50,7 @@ func NewSQLiteStore(path string) (*SQLiteStore, error) {
 		}
 	}
 
-	db, err := sql.Open("sqlite3", path)
+	db, err := sqliteOpen("sqlite3", path)
 	if err != nil {
 		return nil, fmt.Errorf("store: open sqlite: %w", err)
 	}
@@ -63,7 +68,7 @@ func NewSQLiteStore(path string) (*SQLiteStore, error) {
 	}
 
 	st := &SQLiteStore{db: db}
-	if err := st.prepareStatements(); err != nil {
+	if err := sqlitePrepareStatements(st); err != nil {
 		_ = st.Close()
 		return nil, err
 	}
@@ -119,77 +124,92 @@ func (s *SQLiteStore) prepareStatements() error {
 	}
 
 	ctx := context.Background()
-	var err error
-
-	s.insertRunStmt, err = s.db.PrepareContext(ctx, `
-		INSERT INTO runs (
-			id, started_at, finished_at, total_suites, passed_suites, failed_suites, config_json
-		) VALUES (?, ?, ?, ?, ?, ?, ?)
-	`)
-	if err != nil {
-		return fmt.Errorf("store: prepare insert run: %w", err)
+	type stmtSpec struct {
+		dst    **sql.Stmt
+		query  string
+		errFmt string
 	}
 
-	s.insertSuiteStmt, err = s.db.PrepareContext(ctx, `
-		INSERT INTO suite_results (
-			id, run_id, prompt_name, prompt_version, suite_name, total_cases, passed_cases,
-			failed_cases, pass_rate, avg_score, total_latency, total_tokens, created_at, case_results
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`)
-	if err != nil {
-		return fmt.Errorf("store: prepare insert suite: %w", err)
+	specs := []stmtSpec{
+		{
+			dst: &s.insertRunStmt,
+			query: `
+				INSERT INTO runs (
+					id, started_at, finished_at, total_suites, passed_suites, failed_suites, config_json
+				) VALUES (?, ?, ?, ?, ?, ?, ?)
+			`,
+			errFmt: "store: prepare insert run: %w",
+		},
+		{
+			dst: &s.insertSuiteStmt,
+			query: `
+				INSERT INTO suite_results (
+					id, run_id, prompt_name, prompt_version, suite_name, total_cases, passed_cases,
+					failed_cases, pass_rate, avg_score, total_latency, total_tokens, created_at, case_results
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`,
+			errFmt: "store: prepare insert suite: %w",
+		},
+		{
+			dst: &s.getRunStmt,
+			query: `
+				SELECT id, started_at, finished_at, total_suites, passed_suites, failed_suites, config_json
+				FROM runs WHERE id = ?
+			`,
+			errFmt: "store: prepare get run: %w",
+		},
+		{
+			dst: &s.suitesByRunStmt,
+			query: `
+				SELECT id, run_id, prompt_name, prompt_version, suite_name, total_cases, passed_cases,
+					failed_cases, pass_rate, avg_score, total_latency, total_tokens, created_at, case_results
+				FROM suite_results
+				WHERE run_id = ?
+				ORDER BY created_at ASC, suite_name ASC
+			`,
+			errFmt: "store: prepare get suites: %w",
+		},
+		{
+			dst: &s.promptHistoryStmt,
+			query: `
+				SELECT id, run_id, prompt_name, prompt_version, suite_name, total_cases, passed_cases,
+					failed_cases, pass_rate, avg_score, total_latency, total_tokens, created_at, case_results
+				FROM suite_results
+				WHERE prompt_name = ?
+				ORDER BY created_at DESC
+				LIMIT ?
+			`,
+			errFmt: "store: prepare prompt history: %w",
+		},
+		{
+			dst: &s.latestRunByPromptVersionStmt,
+			query: `
+				SELECT run_id FROM suite_results
+				WHERE prompt_name = ? AND prompt_version = ?
+				ORDER BY created_at DESC
+				LIMIT 1
+			`,
+			errFmt: "store: prepare latest run: %w",
+		},
+		{
+			dst: &s.suitesByRunPromptVersionStmt,
+			query: `
+				SELECT id, run_id, prompt_name, prompt_version, suite_name, total_cases, passed_cases,
+					failed_cases, pass_rate, avg_score, total_latency, total_tokens, created_at, case_results
+				FROM suite_results
+				WHERE run_id = ? AND prompt_name = ? AND prompt_version = ?
+				ORDER BY created_at ASC, suite_name ASC
+			`,
+			errFmt: "store: prepare suites by run/version: %w",
+		},
 	}
 
-	s.getRunStmt, err = s.db.PrepareContext(ctx, `
-		SELECT id, started_at, finished_at, total_suites, passed_suites, failed_suites, config_json
-		FROM runs WHERE id = ?
-	`)
-	if err != nil {
-		return fmt.Errorf("store: prepare get run: %w", err)
-	}
-
-	s.suitesByRunStmt, err = s.db.PrepareContext(ctx, `
-		SELECT id, run_id, prompt_name, prompt_version, suite_name, total_cases, passed_cases,
-			failed_cases, pass_rate, avg_score, total_latency, total_tokens, created_at, case_results
-		FROM suite_results
-		WHERE run_id = ?
-		ORDER BY created_at ASC, suite_name ASC
-	`)
-	if err != nil {
-		return fmt.Errorf("store: prepare get suites: %w", err)
-	}
-
-	s.promptHistoryStmt, err = s.db.PrepareContext(ctx, `
-		SELECT id, run_id, prompt_name, prompt_version, suite_name, total_cases, passed_cases,
-			failed_cases, pass_rate, avg_score, total_latency, total_tokens, created_at, case_results
-		FROM suite_results
-		WHERE prompt_name = ?
-		ORDER BY created_at DESC
-		LIMIT ?
-	`)
-	if err != nil {
-		return fmt.Errorf("store: prepare prompt history: %w", err)
-	}
-
-	s.latestRunByPromptVersionStmt, err = s.db.PrepareContext(ctx, `
-		SELECT run_id FROM suite_results
-		WHERE prompt_name = ? AND prompt_version = ?
-		ORDER BY created_at DESC
-		LIMIT 1
-	`)
-	if err != nil {
-		return fmt.Errorf("store: prepare latest run: %w", err)
-	}
-
-	s.suitesByRunPromptVersionStmt, err = s.db.PrepareContext(ctx, `
-		SELECT id, run_id, prompt_name, prompt_version, suite_name, total_cases, passed_cases,
-			failed_cases, pass_rate, avg_score, total_latency, total_tokens, created_at, case_results
-		FROM suite_results
-		WHERE run_id = ? AND prompt_name = ? AND prompt_version = ?
-		ORDER BY created_at ASC, suite_name ASC
-	`)
-	if err != nil {
-		return fmt.Errorf("store: prepare suites by run/version: %w", err)
+	for _, spec := range specs {
+		stmt, err := s.db.PrepareContext(ctx, spec.query)
+		if err != nil {
+			return fmt.Errorf(spec.errFmt, err)
+		}
+		*spec.dst = stmt
 	}
 
 	return nil
@@ -441,18 +461,15 @@ func (s *SQLiteStore) ListRuns(ctx context.Context, filter RunFilter) ([]*RunRec
 		args = append(args, limit)
 	}
 
-	stmt, err := s.db.PrepareContext(ctx, sb.String())
-	if err != nil {
-		return nil, fmt.Errorf("store: prepare list runs: %w", err)
-	}
-	defer stmt.Close()
-
-	rows, err := stmt.QueryContext(ctx, args...)
+	rows, err := s.db.QueryContext(ctx, sb.String(), args...)
 	if err != nil {
 		return nil, fmt.Errorf("store: list runs: %w", err)
 	}
 	defer rows.Close()
+	return scanRunRows(rows)
+}
 
+func scanRunRows(rows *sql.Rows) ([]*RunRecord, error) {
 	var out []*RunRecord
 	for rows.Next() {
 		var (
@@ -558,23 +575,25 @@ func (s *SQLiteStore) GetVersionComparison(ctx context.Context, promptName, v1, 
 		return nil, err
 	}
 
-	v1Results, err := s.suiteResultsByRunPromptVersion(ctx, runID1, promptName, v1)
-	if err != nil {
-		return nil, err
-	}
-	v2Results, err := s.suiteResultsByRunPromptVersion(ctx, runID2, promptName, v2)
-	if err != nil {
-		return nil, err
+	runIDs := []string{runID1, runID2}
+	versions := []string{v1, v2}
+	results := make([][]*SuiteRecord, 2)
+	for i := range runIDs {
+		res, err := s.suiteResultsByRunPromptVersion(ctx, runIDs[i], promptName, versions[i])
+		if err != nil {
+			return nil, err
+		}
+		results[i] = res
 	}
 
-	regressions, improvements := compareCaseOutcomes(v1Results, v2Results)
+	regressions, improvements := compareCaseOutcomes(results[0], results[1])
 
 	return &VersionComparison{
 		PromptName:   promptName,
 		V1:           v1,
 		V2:           v2,
-		V1Results:    v1Results,
-		V2Results:    v2Results,
+		V1Results:    results[0],
+		V2Results:    results[1],
 		Regressions:  regressions,
 		Improvements: improvements,
 	}, nil

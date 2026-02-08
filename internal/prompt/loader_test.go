@@ -106,3 +106,33 @@ func TestLoadFromDir_BadYAML(t *testing.T) {
 		t.Fatalf("LoadFromDir: expected error")
 	}
 }
+
+func TestLoadFromDir_Missing(t *testing.T) {
+	t.Parallel()
+
+	_, err := LoadFromDir(filepath.Join(t.TempDir(), "missing"))
+	if err == nil {
+		t.Fatalf("LoadFromDir: expected error")
+	}
+}
+
+func TestLoadFromDir_SkipsSubdirs(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	if err := os.Mkdir(filepath.Join(dir, "subdir"), 0o755); err != nil {
+		t.Fatalf("Mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a.yaml"), []byte("name: a\ntemplate: a\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	ps, err := LoadFromDir(dir)
+	if err != nil {
+		t.Fatalf("LoadFromDir: %v", err)
+	}
+	if len(ps) != 1 || ps[0].Name != "a" {
+		t.Fatalf("LoadFromDir: got %#v", ps)
+	}
+}

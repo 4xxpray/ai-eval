@@ -250,6 +250,38 @@ func TestExtractJSONStringField_NotString(t *testing.T) {
 	}
 }
 
+func TestExtractJSONStringField_EmptyAfterColon(t *testing.T) {
+	text := `{"optimized_prompt":`
+	got := extractJSONStringField(text, "optimized_prompt")
+	if got != "" {
+		t.Errorf("expected empty, got %q", got)
+	}
+}
+
+func TestExtractJSONStringField_UnknownEscape(t *testing.T) {
+	text := `{"optimized_prompt": "a\qb"}`
+	got := extractJSONStringField(text, "optimized_prompt")
+	if got != `a\qb` {
+		t.Errorf("unexpected: %q", got)
+	}
+}
+
+func TestExtractJSONStringField_BackslashEscape(t *testing.T) {
+	text := `{"optimized_prompt": "a\\b"}`
+	got := extractJSONStringField(text, "optimized_prompt")
+	if got != `a\b` {
+		t.Errorf("unexpected: %q", got)
+	}
+}
+
+func TestExtractJSONStringField_CarriageReturnEscape(t *testing.T) {
+	text := `{"optimized_prompt": "a\rb"}`
+	got := extractJSONStringField(text, "optimized_prompt")
+	if got != "a\rb" {
+		t.Errorf("unexpected: %q", got)
+	}
+}
+
 func TestOptimize_TruncatedJSON(t *testing.T) {
 	// Simulate a truncated response where JSON is incomplete
 	truncated := `{"optimized_prompt": "improved prompt content here", "summary": "fixed issues`

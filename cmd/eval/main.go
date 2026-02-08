@@ -3,10 +3,11 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 
-	"github.com/stellarlinkco/ai-eval/internal/config"
 	"github.com/spf13/cobra"
+	"github.com/stellarlinkco/ai-eval/internal/config"
 )
 
 const (
@@ -19,14 +20,20 @@ type cliState struct {
 	cfg        *config.Config
 }
 
+var (
+	osExit                 = os.Exit
+	stderrWriter io.Writer = os.Stderr
+)
+
 func main() {
 	cmd := newRootCmd()
 	if err := cmd.Execute(); err != nil {
 		if errors.Is(err, errTestsFailed) || errors.Is(err, errRegression) {
-			os.Exit(1)
+			osExit(1)
+			return
 		}
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		fmt.Fprintln(stderrWriter, err)
+		osExit(1)
 	}
 }
 
